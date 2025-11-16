@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DCF Valuation Tool</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>DCF Valuation Tool</h1>
+            <p class="subtitle">Build discounted cash flow models from SEC 10-K filings</p>
+        </header>
+
+        <div class="main-content">
+            <!-- Input Section -->
+            <section class="input-section">
+                <h2>Company Information</h2>
+                <form id="companyForm">
+                    <div class="form-group">
+                        <label for="companyIdentifier">Company Ticker or CIK:</label>
+                        <input type="text" id="companyIdentifier" name="identifier" 
+                               placeholder="e.g., AAPL or 0000320193" required>
+                        <button type="submit" id="fetchBtn">Fetch Company Data</button>
+                    </div>
+                </form>
+
+                <div id="companyInfo" class="company-info" style="display: none;">
+                    <h3 id="companyName"></h3>
+                    <p id="companyCIK"></p>
+                </div>
+            </section>
+
+            <!-- DCF Assumptions Section -->
+            <section class="assumptions-section">
+                <h2>DCF Assumptions</h2>
+                <form id="dcfForm">
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="projectionYears">Projection Period (years):</label>
+                            <input type="number" id="projectionYears" name="projection_years" 
+                                   value="5" min="1" max="10" required>
+                        </div>
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="riskFreeRate">Risk-Free Rate (%):</label>
+                            <input type="number" id="riskFreeRate" name="risk_free_rate" 
+                                   step="0.01" value="3.0" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="beta">Beta:</label>
+                            <input type="number" id="beta" name="beta" 
+                                   step="0.01" value="1.0" required>
+                        </div>
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="marketRiskPremium">Market Risk Premium (%):</label>
+                            <input type="number" id="marketRiskPremium" name="market_risk_premium" 
+                                   step="0.01" value="6.0" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="costOfDebt">Cost of Debt (%):</label>
+                            <input type="number" id="costOfDebt" name="cost_of_debt" 
+                                   step="0.01" value="5.0" required>
+                        </div>
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="taxRate">Tax Rate (%):</label>
+                            <input type="number" id="taxRate" name="tax_rate" 
+                                   step="0.01" value="25.0" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="debtToEquity">Debt-to-Equity Ratio:</label>
+                            <input type="number" id="debtToEquity" name="debt_to_equity" 
+                                   step="0.01" value="0.3" required>
+                        </div>
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="terminalGrowthRate">Terminal Growth Rate (%):</label>
+                            <input type="number" id="terminalGrowthRate" name="terminal_growth_rate" 
+                                   step="0.01" value="3.0" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="revenueGrowth">Revenue Growth Rate (%):</label>
+                            <input type="number" id="revenueGrowth" name="revenue_growth" 
+                                   step="0.01" placeholder="Auto (historical avg)" required>
+                        </div>
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="grossMargin">Gross Margin (%):</label>
+                            <input type="number" id="grossMargin" name="gross_margin" 
+                                   step="0.01" placeholder="Auto (historical avg)" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="sgaPercent">SG&A as % of Revenue:</label>
+                            <input type="number" id="sgaPercent" name="sga_percent" 
+                                   step="0.01" placeholder="Auto (historical avg)" required>
+                        </div>
+                    </div>
+
+                    <button type="submit" id="calculateBtn" disabled>Calculate DCF</button>
+                </form>
+            </section>
+
+            <!-- Loading Indicator -->
+            <div id="loadingIndicator" class="loading" style="display: none;">
+                <div class="spinner"></div>
+                <p>Processing...</p>
+            </div>
+
+            <!-- Results Section -->
+            <section class="results-section" id="resultsSection" style="display: none;">
+                <h2>DCF Valuation Results</h2>
+                
+                <!-- DCF Summary -->
+                <div class="dcf-summary">
+                    <h3>Valuation Summary</h3>
+                    <div class="summary-grid">
+                        <div class="summary-item">
+                            <label>WACC:</label>
+                            <span id="waccValue"></span>
+                        </div>
+                        <div class="summary-item">
+                            <label>Enterprise Value:</label>
+                            <span id="enterpriseValue"></span>
+                        </div>
+                        <div class="summary-item">
+                            <label>Equity Value:</label>
+                            <span id="equityValue"></span>
+                        </div>
+                        <div class="summary-item">
+                            <label>Terminal Value:</label>
+                            <span id="terminalValue"></span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Financial Statements Tabs -->
+                <div class="tabs">
+                    <button class="tab-button active" data-tab="income">Income Statement</button>
+                    <button class="tab-button" data-tab="balance">Balance Sheet</button>
+                    <button class="tab-button" data-tab="cashflow">Cash Flow Statement</button>
+                    <button class="tab-button" data-tab="dcf-details">DCF Details</button>
+                </div>
+
+                <div class="tab-content">
+                    <div id="incomeTab" class="tab-pane active">
+                        <div class="table-container">
+                            <table id="incomeTable" class="financial-table">
+                                <thead></thead>
+                                <tbody></tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <div id="balanceTab" class="tab-pane">
+                        <div class="table-container">
+                            <table id="balanceTable" class="financial-table">
+                                <thead></thead>
+                                <tbody></tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <div id="cashflowTab" class="tab-pane">
+                        <div class="table-container">
+                            <table id="cashflowTable" class="financial-table">
+                                <thead></thead>
+                                <tbody></tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <div id="dcf-detailsTab" class="tab-pane">
+                        <div class="table-container">
+                            <table id="dcfDetailsTable" class="financial-table">
+                                <thead></thead>
+                                <tbody></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Export Buttons -->
+                <div class="export-section">
+                    <h3>Export Results</h3>
+                    <div class="export-buttons">
+                        <button id="exportExcelBtn" class="export-btn">Download Excel</button>
+                        <button id="exportCsvBtn" class="export-btn">Download CSV</button>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Error Message -->
+            <div id="errorMessage" class="error-message" style="display: none;"></div>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+</body>
+</html>
+
