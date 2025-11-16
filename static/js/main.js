@@ -225,9 +225,57 @@ function displayFinancialTable(tableId, data) {
     const years = Object.keys(data).sort();
     if (years.length === 0) return;
     
-    // Get all line items from first year
+    // Define proper order for each statement type
+    const incomeStatementOrder = [
+        'Revenue', 'COGS', 'GrossProfit', 'SG&A', 'OtherOperatingExpenses',
+        'EBITDA', 'D&A', 'OperatingIncome', 'InterestExpense', 'InterestIncome',
+        'OtherUnusualItems', 'EBT', 'TaxExpense', 'NetIncome'
+    ];
+    
+    const balanceSheetOrder = [
+        'Cash', 'ShortTermInvestments', 'CurrentAssets', 'PPE', 'OtherLongTermAssets',
+        'TotalAssets', 'ShortTermLiabilities', 'LongTermDebt', 'LongTermLeases',
+        'OtherLongTermLiabilities', 'TotalLiabilities', 'RetainedEarnings',
+        'CommonStock', 'PaidInCapital', 'TotalEquity'
+    ];
+    
+    const cashFlowOrder = [
+        'NetIncome', 'D&A', 'ChangeInWorkingCapital', 'ChangeInCurrentAssets',
+        'ChangeInCurrentLiabilities', 'OperatingCashFlow', 'CapitalExpenditures',
+        'InvestingCashFlow', 'FinancingCashFlow', 'NetCashFlow'
+    ];
+    
+    // Determine which order to use based on table ID
+    let orderedLineItems;
     const firstYear = years[0];
-    const lineItems = Object.keys(data[firstYear]);
+    const availableItems = Object.keys(data[firstYear]);
+    
+    if (tableId === 'incomeTable') {
+        orderedLineItems = incomeStatementOrder.filter(item => availableItems.includes(item));
+        // Add any items not in the predefined order
+        availableItems.forEach(item => {
+            if (!orderedLineItems.includes(item)) {
+                orderedLineItems.push(item);
+            }
+        });
+    } else if (tableId === 'balanceTable') {
+        orderedLineItems = balanceSheetOrder.filter(item => availableItems.includes(item));
+        availableItems.forEach(item => {
+            if (!orderedLineItems.includes(item)) {
+                orderedLineItems.push(item);
+            }
+        });
+    } else if (tableId === 'cashflowTable') {
+        orderedLineItems = cashFlowOrder.filter(item => availableItems.includes(item));
+        availableItems.forEach(item => {
+            if (!orderedLineItems.includes(item)) {
+                orderedLineItems.push(item);
+            }
+        });
+    } else {
+        // Default: use available items in their current order
+        orderedLineItems = availableItems;
+    }
     
     // Create header row
     const headerRow = document.createElement('tr');
@@ -237,8 +285,8 @@ function displayFinancialTable(tableId, data) {
     });
     thead.appendChild(headerRow);
     
-    // Create data rows
-    lineItems.forEach(lineItem => {
+    // Create data rows in proper order
+    orderedLineItems.forEach(lineItem => {
         const row = document.createElement('tr');
         row.appendChild(createCell(formatLineItemName(lineItem)));
         years.forEach(year => {
@@ -303,6 +351,49 @@ function createCell(text, bold = false) {
 }
 
 function formatLineItemName(name) {
+    // Map common abbreviations and camelCase to readable format
+    const nameMap = {
+        'COGS': 'COGS',
+        'SG&A': 'SG&A',
+        'D&A': 'D&A',
+        'EBITDA': 'EBITDA',
+        'EBT': 'EBT',
+        'PPE': 'PPE',
+        'GrossProfit': 'Gross Profit',
+        'OperatingIncome': 'Operating Income',
+        'InterestExpense': 'Interest Expense',
+        'InterestIncome': 'Interest Income',
+        'TaxExpense': 'Tax Expense',
+        'NetIncome': 'Net Income',
+        'OtherOperatingExpenses': 'Other Operating Expenses',
+        'OtherUnusualItems': 'Other Unusual Items',
+        'ShortTermInvestments': 'Short Term Investments',
+        'CurrentAssets': 'Current Assets',
+        'OtherLongTermAssets': 'Other Long Term Assets',
+        'TotalAssets': 'Total Assets',
+        'ShortTermLiabilities': 'Short Term Liabilities',
+        'LongTermDebt': 'Long Term Debt',
+        'LongTermLeases': 'Long Term Leases',
+        'OtherLongTermLiabilities': 'Other Long Term Liabilities',
+        'TotalLiabilities': 'Total Liabilities',
+        'RetainedEarnings': 'Retained Earnings',
+        'CommonStock': 'Common Stock',
+        'PaidInCapital': 'Paid-in Capital',
+        'TotalEquity': 'Total Equity',
+        'ChangeInWorkingCapital': 'Change in Working Capital',
+        'ChangeInCurrentAssets': 'Change in Current Assets',
+        'ChangeInCurrentLiabilities': 'Change in Current Liabilities',
+        'OperatingCashFlow': 'Operating Cash Flow',
+        'CapitalExpenditures': 'Capital Expenditures',
+        'InvestingCashFlow': 'Investing Cash Flow',
+        'FinancingCashFlow': 'Financing Cash Flow',
+        'NetCashFlow': 'Net Cash Flow'
+    };
+    
+    if (nameMap[name]) {
+        return nameMap[name];
+    }
+    
     // Convert camelCase to readable format
     return name
         .replace(/([A-Z])/g, ' $1')

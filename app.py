@@ -29,15 +29,33 @@ def fetch_company():
         if not identifier:
             return jsonify({'error': 'Company identifier (ticker or CIK) is required'}), 400
         
+        identifier = identifier.strip()
+        print(f"DEBUG: Fetching company data for identifier: {identifier}")
+        
         # Fetch company data
         company_data = sec_client.fetch_company_data(identifier)
         
         if 'error' in company_data:
+            print(f"DEBUG: Error fetching company data: {company_data['error']}")
             return jsonify(company_data), 400
         
+        # Check if we got any financial data
+        has_data = bool(company_data.get('income_statement') or 
+                       company_data.get('balance_sheet') or 
+                       company_data.get('cash_flow'))
+        
+        if not has_data:
+            return jsonify({
+                'error': 'No financial statement data found for this company. The company may not have filed XBRL data with the SEC, or the data format may be different.'
+            }), 400
+        
+        print(f"DEBUG: Successfully fetched data for {company_data.get('company_name', 'Unknown')}")
         return jsonify(company_data), 200
         
     except Exception as e:
+        import traceback
+        error_details = traceback.format_exc()
+        print(f"DEBUG: Exception in fetch_company: {error_details}")
         return jsonify({'error': f'Error fetching company data: {str(e)}'}), 500
 
 @app.route('/api/calculate-dcf', methods=['POST'])
