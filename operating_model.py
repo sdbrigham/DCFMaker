@@ -50,16 +50,16 @@ class OperatingModel:
                 
                 # Normalize expense items to be negative (SEC data may have them as positive)
                 # Expenses should be negative in income statements
-                expense_items = ['COGS', 'SG&A', 'InterestExpense', 'TaxExpense', 'D&A', 
-                               'OtherOperatingExpenses', 'OtherUnusualItems']
+                expense_items = ['COGS', 'R&D', 'SG&A', 'TaxExpense', 'D&A', 
+                               'OtherOperatingExpenses', 'OtherUnusualItems', 'MinorityInterest']
                 for item in expense_items:
                     if item in self.income_statement.columns:
                         # If the value is positive, make it negative (expenses are negative)
                         self.income_statement[item] = -abs(self.income_statement[item])
                 
-                # Ensure InterestIncome is positive (income items)
-                if 'InterestIncome' in self.income_statement.columns:
-                    self.income_statement['InterestIncome'] = abs(self.income_statement['InterestIncome'])
+                # OtherIncomeExpenseNet is a combined line item that INCLUDES interest plus other items
+                # It's used for EBT calculation and kept separate for display
+                # Don't normalize it - it's already net and can be positive or negative
                 
                 # Calculate Gross Profit: Revenue - COGS (COGS is now negative, so Revenue + COGS works)
                 if 'Revenue' in self.income_statement.columns and 'COGS' in self.income_statement.columns:
@@ -67,10 +67,13 @@ class OperatingModel:
                         self.income_statement['Revenue'] + self.income_statement['COGS']
                     )  # COGS is negative, so adding gives Revenue - abs(COGS)
                 
-                # Calculate Operating Income if not present: Gross Profit - SG&A - Other Operating Expenses
-                if 'OperatingIncome' not in self.income_statement.columns:
+                # Operating Income: Pull directly from SEC data (don't calculate if it exists)
+                # Only calculate if it's missing and we have the components
+                if 'OperatingIncome' not in self.income_statement.columns or self.income_statement['OperatingIncome'].isna().all():
                     if 'GrossProfit' in self.income_statement.columns:
                         operating_income = self.income_statement['GrossProfit'].copy()
+                        if 'R&D' in self.income_statement.columns:
+                            operating_income += self.income_statement['R&D']  # R&D is negative
                         if 'SG&A' in self.income_statement.columns:
                             operating_income += self.income_statement['SG&A']  # SG&A is negative
                         if 'OtherOperatingExpenses' in self.income_statement.columns:
@@ -79,32 +82,94 @@ class OperatingModel:
                             operating_income += self.income_statement['D&A']  # D&A is negative
                         self.income_statement['OperatingIncome'] = operating_income
                 
-                # Calculate EBITDA if not present: Operating Income + D&A
-                if 'EBITDA' not in self.income_statement.columns:
-                    if 'OperatingIncome' in self.income_statement.columns and 'D&A' in self.income_statement.columns:
-                        self.income_statement['EBITDA'] = (
-                            self.income_statement['OperatingIncome'] - self.income_statement['D&A']
-                        )  # D&A is negative, so subtracting gives addition
-                
-                # Calculate EBT if not present: Operating Income + Interest Expense + Interest Income
+                # Calculate EBT: Operating Income + Other Income/(Expense), Net + Other Unusual Items
+                # OtherIncomeExpenseNet is a combined line item that INCLUDES interest and all other non-operating items
                 if 'EBT' not in self.income_statement.columns:
                     if 'OperatingIncome' in self.income_statement.columns:
                         ebt = self.income_statement['OperatingIncome'].copy()
-                        if 'InterestExpense' in self.income_statement.columns:
-                            ebt += self.income_statement['InterestExpense']  # Negative
-                        if 'InterestIncome' in self.income_statement.columns:
-                            ebt += self.income_statement['InterestIncome']  # Positive
+                        
+                        # Use OtherIncomeExpenseNet if it exists (it includes all non-operating income/expense items)
+                        if 'OtherIncomeExpenseNet' in self.income_statement.columns:
+                            ebt += self.income_statement['OtherIncomeExpenseNet']  # Can be positive or negative
+                        
+                        # Add Other Unusual Items if present
                         if 'OtherUnusualItems' in self.income_statement.columns:
                             ebt += self.income_statement['OtherUnusualItems']
+                        
                         self.income_statement['EBT'] = ebt
                 
-                # Calculate Net Income if not present: EBT + Tax Expense
-                if 'NetIncome' not in self.income_statement.columns:
+                # Calculate Net Income Before Minority Interest: EBT + Tax Expense
+                if 'NetIncomeBeforeMinorityInterest' not in self.income_statement.columns:
                     if 'EBT' in self.income_statement.columns:
+                        net_income_before_minority = self.income_statement['EBT'].copy()
+                        if 'TaxExpense' in self.income_statement.columns:
+                            net_income_before_minority += self.income_statement['TaxExpense']  # Tax Expense is negative
+                        self.income_statement['NetIncomeBeforeMinorityInterest'] = net_income_before_minority
+                
+                # Calculate Net Income (final): Net Income Before Minority Interest + Minority Interest
+                if 'NetIncome' not in self.income_statement.columns or self.income_statement['NetIncome'].isna().all():
+                    if 'NetIncomeBeforeMinorityInterest' in self.income_statement.columns:
+                        net_income = self.income_statement['NetIncomeBeforeMinorityInterest'].copy()
+                        if 'MinorityInterest' in self.income_statement.columns:
+                            net_income += self.income_statement['MinorityInterest']  # Minority Interest is negative
+                        self.income_statement['NetIncome'] = net_income
+                    elif 'EBT' in self.income_statement.columns:
+                        # Fallback: calculate from EBT if NetIncomeBeforeMinorityInterest not available
                         net_income = self.income_statement['EBT'].copy()
                         if 'TaxExpense' in self.income_statement.columns:
                             net_income += self.income_statement['TaxExpense']  # Tax Expense is negative
+                        if 'MinorityInterest' in self.income_statement.columns:
+                            net_income += self.income_statement['MinorityInterest']  # Minority Interest is negative
                         self.income_statement['NetIncome'] = net_income
+                
+                # Calculate margins and percentages for historical data (matching Excel structure)
+                if 'Revenue' in self.income_statement.columns:
+                    revenue_col = self.income_statement['Revenue']
+                    
+                    # Gross Margin
+                    if 'GrossProfit' in self.income_statement.columns:
+                        self.income_statement['GrossMargin'] = (
+                            self.income_statement['GrossProfit'] / revenue_col * 100
+                        ).fillna(0)
+                    
+                    # R&D % of Revenue
+                    if 'R&D' in self.income_statement.columns:
+                        self.income_statement['R&DPctRevenue'] = (
+                            abs(self.income_statement['R&D']) / revenue_col * 100
+                        ).fillna(0)
+                    
+                    # SG&A % of Revenue
+                    if 'SG&A' in self.income_statement.columns:
+                        self.income_statement['SG&APctRevenue'] = (
+                            abs(self.income_statement['SG&A']) / revenue_col * 100
+                        ).fillna(0)
+                    
+                    # Operating Margin (always calculate from Operating Income)
+                    if 'OperatingIncome' in self.income_statement.columns:
+                        self.income_statement['OperatingMargin'] = (
+                            self.income_statement['OperatingIncome'] / revenue_col * 100
+                        ).fillna(0)
+                    
+                    # Other Operating Expenses % of Revenue
+                    if 'OtherOperatingExpenses' in self.income_statement.columns:
+                        self.income_statement['OtherOperatingExpensesPctRevenue'] = (
+                            self.income_statement['OtherOperatingExpenses'] / revenue_col * 100
+                        ).fillna(0)
+                    
+                    # Other Unusual Items % of Revenue
+                    if 'OtherUnusualItems' in self.income_statement.columns:
+                        self.income_statement['OtherUnusualItemsPctRevenue'] = (
+                            self.income_statement['OtherUnusualItems'] / revenue_col * 100
+                        ).fillna(0)
+                
+                # Effective Tax Rate
+                if 'EBT' in self.income_statement.columns and 'TaxExpense' in self.income_statement.columns:
+                    ebt_col = self.income_statement['EBT']
+                    tax_col = self.income_statement['TaxExpense']
+                    # Avoid division by zero
+                    self.income_statement['EffectiveTaxRate'] = (
+                        (abs(tax_col) / ebt_col * 100).where(ebt_col != 0, 0)
+                    ).fillna(0)
             
             # Balance Sheet
             if self.historical_data.get('balance_sheet'):
@@ -178,392 +243,416 @@ class OperatingModel:
         
         return np.mean(growth_rates) if growth_rates else 0.0
     
-    def project_income_statement(self, revenue_growth: float = None, 
-                                 gross_margin: float = None,
-                                 sga_percent: float = None,
-                                 tax_rate: float = 0.25) -> pd.DataFrame:
-        """
-        Project Income Statement forward
-        
-        Args:
-            revenue_growth: Annual revenue growth rate (if None, uses historical average)
-            gross_margin: Target gross margin (if None, uses historical average)
-            sga_percent: SG&A as % of revenue (if None, uses historical average)
-            tax_rate: Tax rate for projections
-        """
-        if self.income_statement is None or self.income_statement.empty:
-            return pd.DataFrame()
-        
-        latest_year_str = self.get_latest_year()
-        if latest_year_str is None:
-            return pd.DataFrame()
-        latest_year = int(latest_year_str)
-        projection_data = []
-        
-        # Get historical averages
-        if revenue_growth is None:
-            if 'Revenue' in self.income_statement.columns:
-                revenue_series = self.income_statement['Revenue']
-                revenue_growth = self.calculate_average_growth_rate(revenue_series)
-            else:
-                revenue_growth = 0.05  # Default 5% growth
-        
-        if gross_margin is None:
-            if 'Revenue' in self.income_statement.columns and 'COGS' in self.income_statement.columns:
-                revenue = self.income_statement['Revenue']
-                cogs = self.income_statement['COGS']
-                # Filter out zeros and calculate gross margin
-                valid_mask = (revenue != 0) & (cogs != 0)
-                if valid_mask.any():
-                    # COGS is negative, so Revenue + COGS = Revenue - abs(COGS) = Gross Profit
-                    gross_profits = revenue + cogs  # COGS is negative
-                    gross_margins = gross_profits[valid_mask] / revenue[valid_mask]
-                    gross_margin = gross_margins.mean()
-                    # Ensure gross margin is reasonable (between 0 and 1)
-                    gross_margin = max(0.1, min(0.9, gross_margin))
-                else:
-                    gross_margin = 0.5
-            else:
-                gross_margin = 0.5
-        
-        if sga_percent is None:
-            if 'Revenue' in self.income_statement.columns and 'SG&A' in self.income_statement.columns:
-                revenue = self.income_statement['Revenue']
-                sga = self.income_statement['SG&A']
-                # Filter out zeros
-                valid_mask = (revenue != 0) & (sga != 0)
-                if valid_mask.any():
-                    sga_percents = abs(sga[valid_mask]) / revenue[valid_mask]
-                    sga_percent = sga_percents.mean()
-                else:
-                    sga_percent = 0.4
-            else:
-                sga_percent = 0.4
-        
-        # Get latest values - use proper DataFrame access
-        latest_row = self.income_statement.loc[str(latest_year)]
-        latest_revenue = latest_row['Revenue'] if 'Revenue' in self.income_statement.columns else 0
-        latest_da = latest_row['D&A'] if 'D&A' in self.income_statement.columns else 0
-        
-        # Validate we have actual data
-        if latest_revenue == 0 or pd.isna(latest_revenue):
-            print(f"WARNING: Latest revenue is 0 or NaN for year {latest_year}")
-            # Try to get a recent non-zero revenue
-            if 'Revenue' in self.income_statement.columns:
-                revenue_col = self.income_statement['Revenue']
-                non_zero_revenues = revenue_col[revenue_col != 0]
-                if not non_zero_revenues.empty:
-                    latest_revenue = non_zero_revenues.iloc[-1]
-                    print(f"Using revenue from earlier year: {latest_revenue}")
-                else:
-                    print("ERROR: No valid revenue data found")
-                    return pd.DataFrame()
-        
-        # Project forward
-        for year_offset in range(1, self.projection_years + 1):
-            year = latest_year + year_offset
-            
-            # Revenue (positive)
-            revenue = latest_revenue * ((1 + revenue_growth) ** year_offset)
-            
-            # COGS (negative expense)
-            # COGS = Revenue * (1 - Gross Margin)
-            cogs = -revenue * (1 - gross_margin)
-            
-            # Gross Profit = Revenue - COGS (since COGS is negative, this is Revenue + COGS)
-            gross_profit = revenue + cogs
-            
-            # SG&A (negative expense)
-            sga = -revenue * sga_percent
-            
-            # Other Operating Expenses (assume 0 for projections)
-            other_opex = 0
-            
-            # EBITDA = Gross Profit - SG&A - Other Operating Expenses
-            # Since SG&A and other_opex are negative, we add them
-            ebitda = gross_profit + sga + other_opex
-            
-            # D&A (negative expense, but we'll store as negative and add it back for EBITDA)
-            # D&A grows slower than revenue
-            da_positive = abs(latest_da) * (1 + revenue_growth * 0.5) if latest_da != 0 else revenue * 0.03
-            da = -da_positive  # Store as negative
-            
-            # Operating Income = EBITDA - D&A (since D&A is negative, this is EBITDA + abs(D&A))
-            operating_income = ebitda - da
-            
-            # Interest Expense (assume constant or small)
-            if 'InterestExpense' in self.income_statement.columns:
-                interest_expense = latest_row['InterestExpense'] if not pd.isna(latest_row['InterestExpense']) else -10.0
-            else:
-                interest_expense = -10.0
-            
-            # Other Unusual Items (assume 0)
-            other_unusual = 0
-            
-            # EBT
-            ebt = operating_income + interest_expense + other_unusual
-            
-            # Tax Expense
-            tax_expense = -ebt * tax_rate
-            
-            # Net Income
-            net_income = ebt + tax_expense
-            
-            projection_data.append({
-                'Revenue': revenue,
-                'COGS': cogs,  # Already negative
-                'GrossProfit': gross_profit,
-                'SG&A': sga,  # Already negative
-                'OtherOperatingExpenses': other_opex,  # Already negative (0)
-                'EBITDA': ebitda,
-                'D&A': da,  # Already negative
-                'OperatingIncome': operating_income,
-                'InterestExpense': interest_expense,  # Already negative
-                'OtherUnusualItems': other_unusual,  # 0
-                'EBT': ebt,
-                'TaxExpense': tax_expense,  # Negative
-                'NetIncome': net_income
-            })
-        
-        return pd.DataFrame(projection_data, index=[str(latest_year + i) for i in range(1, self.projection_years + 1)])
+    # COMMENTED OUT: Projection logic - focusing on historical data only for now
+    # def project_income_statement(self, revenue_growth: float = None, 
+    #                              gross_margin: float = None,
+    #                              sga_percent: float = None,
+    #                              tax_rate: float = 0.25) -> pd.DataFrame:
+    #     """
+    #     Project Income Statement forward
+    #     
+    #     Args:
+    #         revenue_growth: Annual revenue growth rate (if None, uses historical average)
+    #         gross_margin: Target gross margin (if None, uses historical average)
+    #         sga_percent: SG&A as % of revenue (if None, uses historical average)
+    #         tax_rate: Tax rate for projections
+    #     """
+    #     if self.income_statement is None or self.income_statement.empty:
+    #         print("ERROR: Income statement is None or empty")
+    #         return pd.DataFrame()
+    #     
+    #     print(f"DEBUG: Income statement shape: {self.income_statement.shape}")
+    #     print(f"DEBUG: Income statement columns: {list(self.income_statement.columns)}")
+    #     print(f"DEBUG: Income statement index: {list(self.income_statement.index)}")
+    #     
+    #     latest_year_str = self.get_latest_year()
+    #     if latest_year_str is None:
+    #         print("ERROR: Could not determine latest year from income statement")
+    #         return pd.DataFrame()
+    #     
+    #     print(f"DEBUG: Latest year: {latest_year_str}")
+    #     latest_year = int(latest_year_str)
+    #     projection_data = []
+    #     
+    #     # Get historical averages
+    #     if revenue_growth is None:
+    #         if 'Revenue' in self.income_statement.columns:
+    #             revenue_series = self.income_statement['Revenue']
+    #             revenue_growth = self.calculate_average_growth_rate(revenue_series)
+    #         else:
+    #             revenue_growth = 0.05  # Default 5% growth
+    #     
+    #     if gross_margin is None:
+    #         if 'Revenue' in self.income_statement.columns and 'COGS' in self.income_statement.columns:
+    #             revenue = self.income_statement['Revenue']
+    #             cogs = self.income_statement['COGS']
+    #             # Filter out zeros and calculate gross margin
+    #             valid_mask = (revenue != 0) & (cogs != 0)
+    #             if valid_mask.any():
+    #                 # COGS is negative, so Revenue + COGS = Revenue - abs(COGS) = Gross Profit
+    #                 gross_profits = revenue + cogs  # COGS is negative
+    #                 gross_margins = gross_profits[valid_mask] / revenue[valid_mask]
+    #                 gross_margin = gross_margins.mean()
+    #                 # Ensure gross margin is reasonable (between 0 and 1)
+    #                 gross_margin = max(0.1, min(0.9, gross_margin))
+    #             else:
+    #                 gross_margin = 0.5
+    #         else:
+    #             gross_margin = 0.5
+    #     
+    #     if sga_percent is None:
+    #         if 'Revenue' in self.income_statement.columns and 'SG&A' in self.income_statement.columns:
+    #             revenue = self.income_statement['Revenue']
+    #             sga = self.income_statement['SG&A']
+    #             # Filter out zeros
+    #             valid_mask = (revenue != 0) & (sga != 0)
+    #             if valid_mask.any():
+    #                 sga_percents = abs(sga[valid_mask]) / revenue[valid_mask]
+    #                 sga_percent = sga_percents.mean()
+    #             else:
+    #                 sga_percent = 0.4
+    #         else:
+    #             sga_percent = 0.4
+    #     
+    #     # Get latest values - use proper DataFrame access
+    #     try:
+    #         latest_row = self.income_statement.loc[str(latest_year)]
+    #     except KeyError:
+    #         print(f"ERROR: Year {latest_year} not found in income statement index")
+    #         print(f"Available years: {list(self.income_statement.index)}")
+    #         # Try to use the last available year
+    #         if len(self.income_statement.index) > 0:
+    #             latest_year_str = str(self.income_statement.index[-1])
+    #             latest_year = int(latest_year_str.split('-')[0]) if '-' in latest_year_str else int(latest_year_str)
+    #             latest_row = self.income_statement.loc[latest_year_str]
+    #             print(f"Using latest available year: {latest_year}")
+    #         else:
+    #             return pd.DataFrame()
+    #     
+    #     latest_revenue = latest_row['Revenue'] if 'Revenue' in self.income_statement.columns else 0
+    #     latest_da = latest_row['D&A'] if 'D&A' in self.income_statement.columns else 0
+    #     
+    #     print(f"DEBUG: Latest revenue: {latest_revenue}, Latest D&A: {latest_da}")
+    #     
+    #     # Validate we have actual data
+    #     if latest_revenue == 0 or pd.isna(latest_revenue):
+    #         print(f"WARNING: Latest revenue is 0 or NaN for year {latest_year}")
+    #         # Try to get a recent non-zero revenue
+    #         if 'Revenue' in self.income_statement.columns:
+    #             revenue_col = self.income_statement['Revenue']
+    #             non_zero_revenues = revenue_col[revenue_col != 0]
+    #             if not non_zero_revenues.empty:
+    #                 latest_revenue = non_zero_revenues.iloc[-1]
+    #                 print(f"Using revenue from earlier year: {latest_revenue}")
+    #             else:
+    #                 print("ERROR: No valid revenue data found in income statement")
+    #                 print(f"Revenue column values: {revenue_col.tolist()}")
+    #                 print("Attempting to calculate revenue from other line items...")
+    #                 
+    #                 # Try to estimate revenue from other line items if available
+    #                 # If we have NetIncome and can estimate margins, we can work backwards
+    #                 if 'NetIncome' in self.income_statement.columns:
+    #                     net_income_col = self.income_statement['NetIncome']
+    #                     non_zero_ni = net_income_col[net_income_col != 0]
+    #                     if not non_zero_ni.empty:
+    #                         # Estimate revenue from net income assuming ~10% net margin
+    #                         estimated_revenue = abs(non_zero_ni.iloc[-1]) / 0.10
+    #                         print(f"Estimating revenue from Net Income: {estimated_revenue}")
+    #                         latest_revenue = estimated_revenue
+    #                     else:
+    #                         print("ERROR: Cannot estimate revenue - all values are zero")
+    #                         return pd.DataFrame()
+    #                 else:
+    #                     print("ERROR: Cannot estimate revenue - NetIncome not available")
+    #                     return pd.DataFrame()
+    #         else:
+    #             print("ERROR: Revenue column not found in income statement")
+    #             return pd.DataFrame()
+    #     
+    #     # Project forward
+    #     for year_offset in range(1, self.projection_years + 1):
+    #         year = latest_year + year_offset
+    #         
+    #         # Revenue (positive)
+    #         revenue = latest_revenue * ((1 + revenue_growth) ** year_offset)
+    #         
+    #         # COGS (negative expense)
+    #         # COGS = Revenue * (1 - Gross Margin)
+    #         cogs = -revenue * (1 - gross_margin)
+    #         
+    #         # Gross Profit = Revenue - COGS (since COGS is negative, this is Revenue + COGS)
+    #         gross_profit = revenue + cogs
+    #         
+    #         # SG&A (negative expense)
+    #         sga = -revenue * sga_percent
+    #         
+    #         # Other Operating Expenses (assume 0 for projections)
+    #         other_opex = 0
+    #         
+    #         # EBITDA = Gross Profit - SG&A - Other Operating Expenses
+    #         # Since SG&A and other_opex are negative, we add them
+    #         ebitda = gross_profit + sga + other_opex
+    #         
+    #         # D&A (negative expense, but we'll store as negative and add it back for EBITDA)
+    #         # D&A grows slower than revenue
+    #         da_positive = abs(latest_da) * (1 + revenue_growth * 0.5) if latest_da != 0 else revenue * 0.03
+    #         da = -da_positive  # Store as negative
+    #         
+    #         # Operating Income = EBITDA - D&A (since D&A is negative, this is EBITDA + abs(D&A))
+    #         operating_income = ebitda - da
+    #         
+    #         # Interest Expense (assume constant or small)
+    #         if 'InterestExpense' in self.income_statement.columns:
+    #             interest_expense = latest_row['InterestExpense'] if not pd.isna(latest_row['InterestExpense']) else -10.0
+    #         else:
+    #             interest_expense = -10.0
+    #         
+    #         # Other Unusual Items (assume 0)
+    #         other_unusual = 0
+    #         
+    #         # EBT
+    #         ebt = operating_income + interest_expense + other_unusual
+    #         
+    #         # Tax Expense
+    #         tax_expense = -ebt * tax_rate
+    #         
+    #         # Net Income
+    #         net_income = ebt + tax_expense
+    #         
+    #         # Calculate margins and percentages (matching Excel structure)
+    #         gross_margin_pct = (gross_profit / revenue * 100) if revenue != 0 else 0
+    #         sga_pct_revenue = (abs(sga) / revenue * 100) if revenue != 0 else 0
+    #         ebitda_margin = (ebitda / revenue * 100) if revenue != 0 else 0
+    #         operating_margin = (operating_income / revenue * 100) if revenue != 0 else 0
+    #         effective_tax_rate = (abs(tax_expense) / ebt * 100) if ebt != 0 else 0
+    #         other_opex_pct = (other_opex / revenue * 100) if revenue != 0 else 0
+    #         other_unusual_pct = (other_unusual / revenue * 100) if revenue != 0 else 0
+    #         
+    #         projection_data.append({
+    #             'Revenue': revenue,
+    #             'COGS': cogs,  # Already negative
+    #             'GrossProfit': gross_profit,
+    #             'GrossMargin': gross_margin_pct,  # As percentage
+    #             'SG&A': sga,  # Already negative
+    #             'SG&APctRevenue': sga_pct_revenue,  # As percentage
+    #             'OtherOperatingExpenses': other_opex,  # Already negative (0)
+    #             'OtherOperatingExpensesPctRevenue': other_opex_pct,  # As percentage
+    #             'EBITDA': ebitda,
+    #             'EBITDAMargin': ebitda_margin,  # As percentage
+    #             'D&A': da,  # Already negative
+    #             'OperatingIncome': operating_income,
+    #             'OperatingMargin': operating_margin,  # As percentage
+    #             'InterestExpense': interest_expense,  # Already negative (can be positive if income)
+    #             'OtherUnusualItems': other_unusual,  # 0
+    #             'OtherUnusualItemsPctRevenue': other_unusual_pct,  # As percentage
+    #             'EBT': ebt,
+    #             'TaxExpense': tax_expense,  # Negative
+    #             'EffectiveTaxRate': effective_tax_rate,  # As percentage
+    #             'NetIncome': net_income
+    #         })
+    #     
+    #     return pd.DataFrame(projection_data, index=[str(latest_year + i) for i in range(1, self.projection_years + 1)])
     
-    def project_balance_sheet(self, projected_income: pd.DataFrame,
-                             working_capital_ratios: Dict = None) -> pd.DataFrame:
-        """
-        Project Balance Sheet forward
-        
-        Args:
-            projected_income: Projected Income Statement
-            working_capital_ratios: Dict with ratios for AR, Inventory, AP as % of revenue
-        """
-        if self.balance_sheet is None or self.balance_sheet.empty:
-            return pd.DataFrame()
-        
-        latest_year_str = self.get_latest_year()
-        if latest_year_str is None:
-            return pd.DataFrame()
-        latest_year = int(latest_year_str)
-        
-        # Default working capital ratios
-        if working_capital_ratios is None:
-            # Calculate from historical data
-            if 'Revenue' in self.income_statement.columns:
-                latest_revenue = self.income_statement.loc[str(latest_year), 'Revenue']
-                # Assume typical ratios if not available
-                working_capital_ratios = {
-                    'ar_days': 30,
-                    'inventory_days': 60,
-                    'ap_days': 45
-                }
-            else:
-                working_capital_ratios = {
-                    'ar_days': 30,
-                    'inventory_days': 60,
-                    'ap_days': 45
-                }
-        
-        projection_data = []
-        latest_row = self.balance_sheet.loc[str(latest_year)]
-        latest_revenue_val = self.income_statement.loc[str(latest_year), 'Revenue'] if 'Revenue' in self.income_statement.columns else 1
-        
-        for year_offset in range(1, self.projection_years + 1):
-            year = latest_year + year_offset
-            year_str = str(year)
-            
-            # Get projected revenue
-            projected_revenue = projected_income.loc[year_str, 'Revenue']
-            
-            # Cash (will be calculated from cash flow)
-            cash = latest_row['Cash'] if 'Cash' in self.balance_sheet.columns else 0
-            
-            # Short Term Investments (assume constant or grow with revenue)
-            st_investments = latest_row['ShortTermInvestments'] if 'ShortTermInvestments' in self.balance_sheet.columns else 0
-            
-            # Current Assets (simplified - assume grows with revenue)
-            if latest_revenue_val > 0:
-                current_assets = (latest_row['CurrentAssets'] if 'CurrentAssets' in self.balance_sheet.columns else 0) * (projected_revenue / latest_revenue_val)
-            else:
-                current_assets = latest_row['CurrentAssets'] if 'CurrentAssets' in self.balance_sheet.columns else 0
-            
-            # PPE (grows with capex, depreciates)
-            ppe = latest_row['PPE'] if 'PPE' in self.balance_sheet.columns else 0
-            # Assume capex is ~3-5% of revenue
-            capex = projected_revenue * 0.04
-            da = abs(projected_income.loc[year_str, 'D&A'])
-            ppe = ppe + capex - da
-            
-            # Other Long Term Assets (grows with revenue)
-            other_lt_assets = (latest_row['OtherLongTermAssets'] if 'OtherLongTermAssets' in self.balance_sheet.columns else 0) * (1 + 0.02)  # 2% growth
-            
-            # Total Assets
-            total_assets = current_assets + ppe + other_lt_assets
-            
-            # Short Term Liabilities (grows with revenue)
-            if latest_revenue_val > 0:
-                st_liabilities = (latest_row['ShortTermLiabilities'] if 'ShortTermLiabilities' in self.balance_sheet.columns else 0) * (projected_revenue / latest_revenue_val)
-            else:
-                st_liabilities = latest_row['ShortTermLiabilities'] if 'ShortTermLiabilities' in self.balance_sheet.columns else 0
-            
-            # Long Term Debt (assume constant for now)
-            lt_debt = latest_row['LongTermDebt'] if 'LongTermDebt' in self.balance_sheet.columns else 0
-            
-            # Long Term Leases (assume constant)
-            lt_leases = latest_row['LongTermLeases'] if 'LongTermLeases' in self.balance_sheet.columns else 0
-            
-            # Other Long Term Liabilities (assume constant)
-            other_lt_liabilities = latest_row['OtherLongTermLiabilities'] if 'OtherLongTermLiabilities' in self.balance_sheet.columns else 0
-            
-            # Total Liabilities
-            total_liabilities = st_liabilities + lt_debt + lt_leases + other_lt_liabilities
-            
-            # Equity components
-            retained_earnings = latest_row['RetainedEarnings'] if 'RetainedEarnings' in self.balance_sheet.columns else 0
-            net_income = projected_income.loc[year_str, 'NetIncome']
-            retained_earnings = retained_earnings + net_income
-            
-            common_stock = latest_row['CommonStock'] if 'CommonStock' in self.balance_sheet.columns else 0
-            paid_in_capital = latest_row['PaidInCapital'] if 'PaidInCapital' in self.balance_sheet.columns else 0
-            
-            # Total Equity
-            total_equity = retained_earnings + common_stock + paid_in_capital
-            
-            projection_data.append({
-                'Cash': cash,
-                'ShortTermInvestments': st_investments,
-                'CurrentAssets': current_assets,
-                'PPE': ppe,
-                'OtherLongTermAssets': other_lt_assets,
-                'TotalAssets': total_assets,
-                'ShortTermLiabilities': st_liabilities,
-                'LongTermDebt': lt_debt,
-                'LongTermLeases': lt_leases,
-                'OtherLongTermLiabilities': other_lt_liabilities,
-                'TotalLiabilities': total_liabilities,
-                'RetainedEarnings': retained_earnings,
-                'CommonStock': common_stock,
-                'PaidInCapital': paid_in_capital,
-                'TotalEquity': total_equity
-            })
-        
-        return pd.DataFrame(projection_data, index=[str(latest_year + i) for i in range(1, self.projection_years + 1)])
-    
-    def project_cash_flow(self, projected_income: pd.DataFrame,
-                         projected_balance: pd.DataFrame) -> pd.DataFrame:
-        """
-        Project Cash Flow Statement from Income Statement and Balance Sheet changes
-        """
-        if self.cash_flow is None or self.cash_flow.empty:
-            return pd.DataFrame()
-        
-        latest_year_str = self.get_latest_year()
-        if latest_year_str is None:
-            return pd.DataFrame()
-        latest_year = int(latest_year_str)
-        projection_data = []
-        
-        for year_offset in range(1, self.projection_years + 1):
-            year = latest_year + year_offset
-            year_str = str(year)
-            prev_year_str = str(year - 1)
-            
-            # Net Income
-            net_income = projected_income.loc[year_str, 'NetIncome']
-            
-            # D&A (add back)
-            da = abs(projected_income.loc[year_str, 'D&A'])
-            
-            # Changes in Working Capital
-            if year_offset == 1:
-                prev_current_assets = self.balance_sheet.loc[str(latest_year), 'CurrentAssets']
-                prev_st_liabilities = self.balance_sheet.loc[str(latest_year), 'ShortTermLiabilities']
-            else:
-                prev_current_assets = projected_balance.loc[prev_year_str, 'CurrentAssets']
-                prev_st_liabilities = projected_balance.loc[prev_year_str, 'ShortTermLiabilities']
-            
-            curr_current_assets = projected_balance.loc[year_str, 'CurrentAssets']
-            curr_st_liabilities = projected_balance.loc[year_str, 'ShortTermLiabilities']
-            
-            change_ca = prev_current_assets - curr_current_assets
-            change_cl = curr_st_liabilities - prev_st_liabilities
-            change_wc = change_ca + change_cl
-            
-            # Operating Cash Flow
-            cfo = net_income + da + change_wc
-            
-            # Capital Expenditures (negative)
-            revenue = projected_income.loc[year_str, 'Revenue']
-            capex = -revenue * 0.04  # Assume 4% of revenue
-            
-            # Investing Cash Flow
-            investing_cf = capex
-            
-            # Financing Cash Flow (simplified - assume no new debt/equity)
-            financing_cf = 0
-            
-            # Net Cash Flow
-            net_cf = cfo + investing_cf + financing_cf
-            
-            projection_data.append({
-                'NetIncome': net_income,
-                'D&A': da,
-                'ChangeInWorkingCapital': change_wc,
-                'ChangeInCurrentAssets': change_ca,
-                'ChangeInCurrentLiabilities': change_cl,
-                'OperatingCashFlow': cfo,
-                'CapitalExpenditures': capex,
-                'InvestingCashFlow': investing_cf,
-                'FinancingCashFlow': financing_cf,
-                'NetCashFlow': net_cf
-            })
-        
-        return pd.DataFrame(projection_data, index=[str(latest_year + i) for i in range(1, self.projection_years + 1)])
+    # COMMENTED OUT: Projection logic - focusing on historical data only
+    # def project_balance_sheet(self, projected_income: pd.DataFrame,
+    #                          working_capital_ratios: Dict = None) -> pd.DataFrame:
+    #     """
+    #     Project Balance Sheet forward
+    #     
+    #     Args:
+    #         projected_income: Projected Income Statement
+    #         working_capital_ratios: Dict with ratios for AR, Inventory, AP as % of revenue
+    #     """
+    #     if self.balance_sheet is None or self.balance_sheet.empty:
+    #         return pd.DataFrame()
+    #     
+    #     latest_year_str = self.get_latest_year()
+    #     if latest_year_str is None:
+    #         return pd.DataFrame()
+    #     latest_year = int(latest_year_str)
+    #     
+    #     # Default working capital ratios
+    #     if working_capital_ratios is None:
+    #         # Calculate from historical data
+    #         if 'Revenue' in self.income_statement.columns:
+    #             latest_revenue = self.income_statement.loc[str(latest_year), 'Revenue']
+    #             # Assume typical ratios if not available
+    #             working_capital_ratios = {
+    #                 'ar_days': 30,
+    #                 'inventory_days': 60,
+    #                 'ap_days': 45
+    #             }
+    #         else:
+    #             working_capital_ratios = {
+    #                 'ar_days': 30,
+    #                 'inventory_days': 60,
+    #                 'ap_days': 45
+    #             }
+    #     
+    #     projection_data = []
+    #     latest_row = self.balance_sheet.loc[str(latest_year)]
+    #     latest_revenue_val = self.income_statement.loc[str(latest_year), 'Revenue'] if 'Revenue' in self.income_statement.columns else 1
+    #     
+    #     for year_offset in range(1, self.projection_years + 1):
+    #         year = latest_year + year_offset
+    #         year_str = str(year)
+    #         
+    #         # Get projected revenue
+    #         if 'Revenue' in projected_income.columns and year_str in projected_income.index:
+    #             projected_revenue = projected_income.loc[year_str, 'Revenue']
+    #         else:
+    #             print(f"WARNING: Revenue not found for year {year_str} in projected income")
+    #             projected_revenue = 0
+    #         
+    #         # Cash (will be calculated from cash flow)
+    #         cash = latest_row['Cash'] if 'Cash' in self.balance_sheet.columns else 0
+    #         
+    #         # Short Term Investments (assume constant or grow with revenue)
+    #         st_investments = latest_row['ShortTermInvestments'] if 'ShortTermInvestments' in self.balance_sheet.columns else 0
+    #         
+    #         # Current Assets (simplified - assume grows with revenue)
+    #         if latest_revenue_val > 0:
+    #             current_assets = (latest_row['CurrentAssets'] if 'CurrentAssets' in self.balance_sheet.columns else 0) * (projected_revenue / latest_revenue_val)
+    #         else:
+    #             current_assets = latest_row['CurrentAssets'] if 'CurrentAssets' in self.balance_sheet.columns else 0
+    #         
+    #         # PPE (grows with capex, depreciates)
+    #         ppe = latest_row['PPE'] if 'PPE' in self.balance_sheet.columns else 0
+    #         # Assume capex is ~3-5% of revenue
+    #         capex = projected_revenue * 0.04
+    #         da = abs(projected_income.loc[year_str, 'D&A'])
+    #         ppe = ppe + capex - da
+    #         
+    #         # Other Long Term Assets (grows with revenue)
+    #         other_lt_assets = (latest_row['OtherLongTermAssets'] if 'OtherLongTermAssets' in self.balance_sheet.columns else 0) * (1 + 0.02)  # 2% growth
+    #         
+    #         # Total Assets
+    #         total_assets = current_assets + ppe + other_lt_assets
+    #         
+    #         # Short Term Liabilities (grows with revenue)
+    #         if latest_revenue_val > 0:
+    #             st_liabilities = (latest_row['ShortTermLiabilities'] if 'ShortTermLiabilities' in self.balance_sheet.columns else 0) * (projected_revenue / latest_revenue_val)
+    #         else:
+    #             st_liabilities = latest_row['ShortTermLiabilities'] if 'ShortTermLiabilities' in self.balance_sheet.columns else 0
+    #         
+    #         # Long Term Debt (assume constant for now)
+    #         lt_debt = latest_row['LongTermDebt'] if 'LongTermDebt' in self.balance_sheet.columns else 0
+    #         
+    #         # Long Term Leases (assume constant)
+    #         lt_leases = latest_row['LongTermLeases'] if 'LongTermLeases' in self.balance_sheet.columns else 0
+    #         
+    #         # Other Long Term Liabilities (assume constant)
+    #         other_lt_liabilities = latest_row['OtherLongTermLiabilities'] if 'OtherLongTermLiabilities' in self.balance_sheet.columns else 0
+    #         
+    #         # Total Liabilities
+    #         total_liabilities = st_liabilities + lt_debt + lt_leases + other_lt_liabilities
+    #         
+    #         # Equity components
+    #         retained_earnings = latest_row['RetainedEarnings'] if 'RetainedEarnings' in self.balance_sheet.columns else 0
+    #         net_income = projected_income.loc[year_str, 'NetIncome']
+    #         retained_earnings = retained_earnings + net_income
+    #         
+    #         common_stock = latest_row['CommonStock'] if 'CommonStock' in self.balance_sheet.columns else 0
+    #         paid_in_capital = latest_row['PaidInCapital'] if 'PaidInCapital' in self.balance_sheet.columns else 0
+    #         
+    #         # Total Equity
+    #         total_equity = retained_earnings + common_stock + paid_in_capital
+    #         
+    #         projection_data.append({
+    #             'Cash': cash,
+    #             'ShortTermInvestments': st_investments,
+    #             'CurrentAssets': current_assets,
+    #             'PPE': ppe,
+    #             'OtherLongTermAssets': other_lt_assets,
+    #             'TotalAssets': total_assets,
+    #             'ShortTermLiabilities': st_liabilities,
+    #             'LongTermDebt': lt_debt,
+    #             'LongTermLeases': lt_leases,
+    #             'OtherLongTermLiabilities': other_lt_liabilities,
+    #             'TotalLiabilities': total_liabilities,
+    #             'RetainedEarnings': retained_earnings,
+    #             'CommonStock': common_stock,
+    #             'PaidInCapital': paid_in_capital,
+    #             'TotalEquity': total_equity
+    #         })
+    #     
+    #     return pd.DataFrame(projection_data, index=[str(latest_year + i) for i in range(1, self.projection_years + 1)])
     
     def build_model(self, assumptions: Dict) -> Dict:
         """
-        Build complete operating model with projections
+        Build operating model with historical data and calculated metrics
+        (Projections are commented out - focusing on historical data only)
         
         Args:
-            assumptions: Dict with projection assumptions (revenue_growth, gross_margin, etc.)
+            assumptions: Dict with assumptions (not used for projections currently)
         
         Returns:
-            Dict with historical and projected financial statements
+            Dict with historical financial statements with calculated metrics
         """
         if not self.prepare_historical_data():
             return {'error': 'Failed to prepare historical data'}
         
+        # Check if income statement has required columns
+        if self.income_statement is None or self.income_statement.empty:
+            return {'error': 'Income statement is empty. Please ensure company data was fetched correctly from SEC.'}
+        
+        if 'Revenue' not in self.income_statement.columns:
+            available_cols = list(self.income_statement.columns) if not self.income_statement.empty else []
+            return {
+                'error': f'Revenue column not found in income statement. Available columns: {available_cols}. Please check that the company has filed XBRL data with the SEC.'
+            }
+        
+        # COMMENTED OUT: Projection logic - focusing on historical data only
         # Project Income Statement
-        revenue_growth = assumptions.get('revenue_growth')
-        gross_margin = assumptions.get('gross_margin')
-        sga_percent = assumptions.get('sga_percent')
-        tax_rate = assumptions.get('tax_rate', 0.25)
+        # revenue_growth = assumptions.get('revenue_growth')
+        # gross_margin = assumptions.get('gross_margin')
+        # sga_percent = assumptions.get('sga_percent')
+        # tax_rate = assumptions.get('tax_rate', 0.25)
+        # 
+        # projected_income = self.project_income_statement(
+        #     revenue_growth=revenue_growth,
+        #     gross_margin=gross_margin,
+        #     sga_percent=sga_percent,
+        #     tax_rate=tax_rate
+        # )
+        # 
+        # # Project Balance Sheet
+        # projected_balance = self.project_balance_sheet(projected_income)
+        # 
+        # # Project Cash Flow
+        # projected_cashflow = self.project_cash_flow(projected_income, projected_balance)
         
-        projected_income = self.project_income_statement(
-            revenue_growth=revenue_growth,
-            gross_margin=gross_margin,
-            sga_percent=sga_percent,
-            tax_rate=tax_rate
-        )
-        
-        # Project Balance Sheet
-        projected_balance = self.project_balance_sheet(projected_income)
-        
-        # Project Cash Flow
-        projected_cashflow = self.project_cash_flow(projected_income, projected_balance)
-        
-        # Combine historical and projected
+        # Return only historical data (with calculated metrics already added in prepare_historical_data)
         latest_year_str = self.get_latest_year()
         if latest_year_str is None:
             return {'error': 'Could not determine latest year from historical data'}
-        latest_year = int(latest_year_str)
         
-        # Income Statement
-        income_combined = pd.concat([self.income_statement, projected_income])
+        # Use historical data only (margins and percentages already calculated)
+        # Ensure all standard line items exist (even if 0) for consistent display
+        standard_line_items = [
+            'Revenue', 'COGS', 'GrossProfit', 'GrossMargin',
+            'R&D', 'R&DPctRevenue',
+            'SG&A', 'SG&APctRevenue',
+            'OtherOperatingExpenses', 'OtherOperatingExpensesPctRevenue',
+            'D&A',
+            'OperatingIncome', 'OperatingMargin',
+            'OtherIncomeExpenseNet',
+            'OtherUnusualItems', 'OtherUnusualItemsPctRevenue',
+            'EBT',
+            'TaxExpense', 'EffectiveTaxRate',
+            'NetIncomeBeforeMinorityInterest',
+            'MinorityInterest',
+            'NetIncome'
+        ]
         
-        # Balance Sheet
-        balance_combined = pd.concat([self.balance_sheet, projected_balance])
+        # Add missing columns with 0 values
+        for item in standard_line_items:
+            if item not in self.income_statement.columns:
+                self.income_statement[item] = 0.0
         
-        # Cash Flow
-        cashflow_combined = pd.concat([self.cash_flow, projected_cashflow]) if not self.cash_flow.empty else projected_cashflow
+        income_combined = self.income_statement
+        balance_combined = self.balance_sheet if (self.balance_sheet is not None and not self.balance_sheet.empty) else pd.DataFrame()
+        cashflow_combined = self.cash_flow if (self.cash_flow is not None and not self.cash_flow.empty) else pd.DataFrame()
         
         # Convert to dict and ensure all values are JSON-serializable (convert numpy types to native Python types)
         def convert_to_serializable(df_dict):
@@ -601,7 +690,7 @@ class OperatingModel:
             'income_statement': convert_to_serializable(income_dict),
             'balance_sheet': convert_to_serializable(balance_dict),
             'cash_flow': convert_to_serializable(cashflow_dict),
-            'latest_year': latest_year,
-            'projection_years': self.projection_years
+            'latest_year': latest_year_str,
+            'projection_years': 0  # No projections currently
         }
 

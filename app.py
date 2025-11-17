@@ -49,6 +49,22 @@ def fetch_company():
                 'error': 'No financial statement data found for this company. The company may not have filed XBRL data with the SEC, or the data format may be different.'
             }), 400
         
+        # Check if Revenue data is actually present (not all zeros)
+        if company_data.get('income_statement'):
+            income_statement = company_data['income_statement']
+            # Check if Revenue exists and has non-zero values
+            revenue_found = False
+            for year, year_data in income_statement.items():
+                if isinstance(year_data, dict) and 'Revenue' in year_data:
+                    if year_data['Revenue'] and year_data['Revenue'] != 0:
+                        revenue_found = True
+                        break
+            
+            if not revenue_found:
+                print("WARNING: Revenue column exists but all values are zero")
+                print(f"Income statement data: {income_statement}")
+                # Don't fail here - let the operating model handle it with better error messages
+        
         print(f"DEBUG: Successfully fetched data for {company_data.get('company_name', 'Unknown')}")
         return jsonify(company_data), 200
         

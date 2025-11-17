@@ -122,11 +122,14 @@ async function handleDCFCalculation(e) {
         });
         
         // Check if response is ok
-        if (!response.ok) {
-            const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
-            showError(errorData.error || `HTTP Error: ${response.status}`);
-            return;
-        }
+            if (!response.ok) {
+                const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+                const errorMsg = errorData.error || `HTTP Error: ${response.status}`;
+                const errorDetails = errorData.details ? `\n\nDetails: ${errorData.details}` : '';
+                showError(errorMsg + errorDetails);
+                console.error('DCF Calculation Error:', errorData);
+                return;
+            }
         
         // Parse JSON response
         let data;
@@ -225,11 +228,21 @@ function displayFinancialTable(tableId, data) {
     const years = Object.keys(data).sort();
     if (years.length === 0) return;
     
-    // Define proper order for each statement type
+    // Define proper order for each statement type (matching Excel structure)
     const incomeStatementOrder = [
-        'Revenue', 'COGS', 'GrossProfit', 'SG&A', 'OtherOperatingExpenses',
-        'EBITDA', 'D&A', 'OperatingIncome', 'InterestExpense', 'InterestIncome',
-        'OtherUnusualItems', 'EBT', 'TaxExpense', 'NetIncome'
+        'Revenue', 'COGS', 'GrossProfit', 'GrossMargin',
+        'R&D', 'R&DPctRevenue',
+        'SG&A', 'SG&APctRevenue',
+        'OtherOperatingExpenses', 'OtherOperatingExpensesPctRevenue',
+        'D&A',
+        'OperatingIncome', 'OperatingMargin',
+        'OtherIncomeExpenseNet',
+        'OtherUnusualItems', 'OtherUnusualItemsPctRevenue',
+        'EBT',
+        'TaxExpense', 'EffectiveTaxRate',
+        'NetIncomeBeforeMinorityInterest',
+        'MinorityInterest',
+        'NetIncome'
     ];
     
     const balanceSheetOrder = [
@@ -291,7 +304,14 @@ function displayFinancialTable(tableId, data) {
         row.appendChild(createCell(formatLineItemName(lineItem)));
         years.forEach(year => {
             const value = data[year][lineItem] || 0;
-            row.appendChild(createCell(formatNumber(value)));
+            // Format as percentage for margin/percentage fields, otherwise as currency
+            if (lineItem.includes('Margin') || lineItem.includes('PctRevenue') || 
+                lineItem.includes('TaxRate') || lineItem === 'GrossMargin') {
+                row.appendChild(createCell(formatPercent(value)));
+            } else {
+                // Format as currency (negative values will show as negative)
+                row.appendChild(createCell(formatNumber(value)));
+            }
         });
         tbody.appendChild(row);
     });
@@ -354,19 +374,27 @@ function formatLineItemName(name) {
     // Map common abbreviations and camelCase to readable format
     const nameMap = {
         'COGS': 'COGS',
+        'R&D': 'R&D',
+        'R&DPctRevenue': 'R&D % of Revenue',
         'SG&A': 'SG&A',
+        'SG&APctRevenue': 'SG&A % of Revenue',
         'D&A': 'D&A',
-        'EBITDA': 'EBITDA',
         'EBT': 'EBT',
         'PPE': 'PPE',
         'GrossProfit': 'Gross Profit',
+        'GrossMargin': 'Gross Margin',
         'OperatingIncome': 'Operating Income',
-        'InterestExpense': 'Interest Expense',
-        'InterestIncome': 'Interest Income',
+        'OperatingMargin': 'Operating Margin',
+        'OtherIncomeExpenseNet': 'Other Income/(Expense), Net',
         'TaxExpense': 'Tax Expense',
+        'EffectiveTaxRate': 'Effective Tax Rate',
+        'NetIncomeBeforeMinorityInterest': 'Net Income (Before Minority Interest)',
+        'MinorityInterest': 'Minority Interest',
         'NetIncome': 'Net Income',
         'OtherOperatingExpenses': 'Other Operating Expenses',
+        'OtherOperatingExpensesPctRevenue': 'Other Operating Expenses % of Revenue',
         'OtherUnusualItems': 'Other Unusual Items',
+        'OtherUnusualItemsPctRevenue': 'Other Unusual Items % of Revenue',
         'ShortTermInvestments': 'Short Term Investments',
         'CurrentAssets': 'Current Assets',
         'OtherLongTermAssets': 'Other Long Term Assets',
@@ -425,7 +453,10 @@ function formatPercent(value) {
     if (value === null || value === undefined || isNaN(value)) {
         return '0.00%';
     }
-    return (value * 100).toFixed(2) + '%';
+    // If value is already a percentage (0-100 range), use as-is
+    // If value is a decimal (0-1 range), multiply by 100
+    const percentValue = Math.abs(value) > 1 ? value : value * 100;
+    return percentValue.toFixed(2) + '%';
 }
 
 async function handleExcelExport() {

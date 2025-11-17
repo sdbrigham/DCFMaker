@@ -64,16 +64,24 @@ class DCFCalculator:
         FCF = Operating Cash Flow - Capital Expenditures
         or
         FCF = EBIT × (1 - Tax Rate) + D&A - Capital Expenditures - Change in Working Capital
+        
+        NOTE: Currently projections are disabled, so this returns an empty Series
         """
         cash_flow = pd.DataFrame(self.operating_model_data.get('cash_flow', {}))
         income_statement = pd.DataFrame(self.operating_model_data.get('income_statement', {}))
         
         if cash_flow.empty or income_statement.empty:
-            return pd.Series()
+            self.free_cash_flows = pd.Series()
+            return self.free_cash_flows
         
         # Get projection years (exclude historical)
         latest_year = self.operating_model_data.get('latest_year', 2023)
-        projection_years = self.operating_model_data.get('projection_years', 5)
+        projection_years = self.operating_model_data.get('projection_years', 0)  # Default to 0 since projections are disabled
+        
+        # If no projection years, return empty Series
+        if projection_years == 0:
+            self.free_cash_flows = pd.Series()
+            return self.free_cash_flows
         
         fcf_data = {}
         
@@ -118,9 +126,16 @@ class DCFCalculator:
         
         Terminal Value = FCF_final × (1 + g) / (WACC - g)
         where g is the terminal growth rate
+        
+        NOTE: Returns 0 if no projections are available
         """
         if self.free_cash_flows is None or self.free_cash_flows.empty:
             self.calculate_free_cash_flow()
+        
+        if self.free_cash_flows is None or self.free_cash_flows.empty:
+            # No projections available
+            self.terminal_value = 0.0
+            return 0.0
         
         if self.wacc is None:
             self.calculate_wacc()
@@ -128,7 +143,12 @@ class DCFCalculator:
         terminal_growth = self.assumptions.get('terminal_growth_rate', 0.03)
         
         # Get final year FCF
-        final_fcf = self.free_cash_flows.iloc[-1]
+        try:
+            final_fcf = self.free_cash_flows.iloc[-1]
+        except IndexError:
+            # No projections available
+            self.terminal_value = 0.0
+            return 0.0
         
         # Terminal Value
         if self.wacc > terminal_growth:
@@ -143,6 +163,8 @@ class DCFCalculator:
     def calculate_present_values(self) -> Dict:
         """
         Calculate present values of projected FCFs and terminal value
+        
+        NOTE: Returns zeros if no projections are available
         """
         if self.free_cash_flows is None or self.free_cash_flows.empty:
             self.calculate_free_cash_flow()
@@ -152,6 +174,14 @@ class DCFCalculator:
         
         if self.terminal_value is None:
             self.calculate_terminal_value()
+        
+        # If no projections, return zeros
+        if self.free_cash_flows is None or self.free_cash_flows.empty:
+            return {
+                'pv_fcf': {},
+                'pv_terminal': 0.0,
+                'total_pv_fcf': 0.0
+            }
         
         latest_year = self.operating_model_data.get('latest_year', 2023)
         
@@ -163,15 +193,17 @@ class DCFCalculator:
             pv_fcf[year] = pv
         
         # Present value of terminal value
-        projection_years = self.operating_model_data.get('projection_years', 5)
-        terminal_year = latest_year + projection_years
-        years_to_terminal = projection_years
-        pv_terminal = self.terminal_value / ((1 + self.wacc) ** years_to_terminal)
+        projection_years = self.operating_model_data.get('projection_years', 0)
+        if projection_years > 0:
+            years_to_terminal = projection_years
+            pv_terminal = self.terminal_value / ((1 + self.wacc) ** years_to_terminal) if self.terminal_value else 0.0
+        else:
+            pv_terminal = 0.0
         
         return {
             'pv_fcf': pv_fcf,
             'pv_terminal': pv_terminal,
-            'total_pv_fcf': sum(pv_fcf.values())
+            'total_pv_fcf': sum(pv_fcf.values()) if pv_fcf else 0.0
         }
     
     def calculate_enterprise_value(self) -> float:
