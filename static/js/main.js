@@ -187,9 +187,20 @@ function displayResults(data) {
         
         // Display Balance Sheet
         if (data.operating_model && data.operating_model.balance_sheet) {
-            displayFinancialTable('balanceTable', data.operating_model.balance_sheet);
+            const balanceSheet = data.operating_model.balance_sheet;
+            if (balanceSheet && Object.keys(balanceSheet).length > 0) {
+                displayFinancialTable('balanceTable', balanceSheet);
+            } else {
+                console.warn('Balance sheet data is empty');
+                const table = document.getElementById('balanceTable');
+                const tbody = table.querySelector('tbody');
+                tbody.innerHTML = '<tr><td colspan="10">No balance sheet data available</td></tr>';
+            }
         } else {
             console.error('Balance sheet data not found');
+            const table = document.getElementById('balanceTable');
+            const tbody = table.querySelector('tbody');
+            tbody.innerHTML = '<tr><td colspan="10">Balance sheet data not found</td></tr>';
         }
         
         // Display Cash Flow
@@ -246,10 +257,21 @@ function displayFinancialTable(tableId, data) {
     ];
     
     const balanceSheetOrder = [
-        'Cash', 'ShortTermInvestments', 'CurrentAssets', 'PPE', 'OtherLongTermAssets',
-        'TotalAssets', 'ShortTermLiabilities', 'LongTermDebt', 'LongTermLeases',
-        'OtherLongTermLiabilities', 'TotalLiabilities', 'RetainedEarnings',
-        'CommonStock', 'PaidInCapital', 'TotalEquity'
+        // Current Assets
+        'CashAndCashEquivalents', 'MarketableSecuritiesCurrent', 'AccountsReceivableNet',
+        'VendorNonTradeReceivables', 'Inventories', 'OtherCurrentAssets', 'TotalCurrentAssets',
+        // Non-Current Assets
+        'MarketableSecuritiesNonCurrent', 'PropertyPlantAndEquipmentNet', 'OtherNonCurrentAssets',
+        'TotalNonCurrentAssets', 'TotalAssets',
+        // Current Liabilities
+        'AccountsPayable', 'OtherCurrentLiabilities', 'DeferredRevenue', 'CommercialPaper',
+        'TermDebtCurrent', 'TotalCurrentLiabilities',
+        // Non-Current Liabilities
+        'TermDebtNonCurrent', 'OtherNonCurrentLiabilities', 'TotalNonCurrentLiabilities',
+        'TotalLiabilities',
+        // Shareholders' Equity
+        'CommonStockAndPaidInCapital', 'AccumulatedDeficit', 'AccumulatedOtherComprehensiveLoss',
+        'TotalShareholdersEquity'
     ];
     
     const cashFlowOrder = [
@@ -395,19 +417,37 @@ function formatLineItemName(name) {
         'OtherOperatingExpensesPctRevenue': 'Other Operating Expenses % of Revenue',
         'OtherUnusualItems': 'Other Unusual Items',
         'OtherUnusualItemsPctRevenue': 'Other Unusual Items % of Revenue',
-        'ShortTermInvestments': 'Short Term Investments',
-        'CurrentAssets': 'Current Assets',
-        'OtherLongTermAssets': 'Other Long Term Assets',
-        'TotalAssets': 'Total Assets',
-        'ShortTermLiabilities': 'Short Term Liabilities',
-        'LongTermDebt': 'Long Term Debt',
-        'LongTermLeases': 'Long Term Leases',
-        'OtherLongTermLiabilities': 'Other Long Term Liabilities',
-        'TotalLiabilities': 'Total Liabilities',
-        'RetainedEarnings': 'Retained Earnings',
-        'CommonStock': 'Common Stock',
-        'PaidInCapital': 'Paid-in Capital',
-        'TotalEquity': 'Total Equity',
+        // Current Assets
+        'CashAndCashEquivalents': 'Cash and cash equivalents',
+        'MarketableSecuritiesCurrent': 'Marketable securities',
+        'AccountsReceivableNet': 'Accounts receivable, net',
+        'VendorNonTradeReceivables': 'Vendor non-trade receivables',
+        'Inventories': 'Inventories',
+        'OtherCurrentAssets': 'Other current assets',
+        'TotalCurrentAssets': 'Total current assets',
+        // Non-Current Assets
+        'MarketableSecuritiesNonCurrent': 'Marketable securities',
+        'PropertyPlantAndEquipmentNet': 'Property, plant and equipment, net',
+        'OtherNonCurrentAssets': 'Other non-current assets',
+        'TotalNonCurrentAssets': 'Total non-current assets',
+        'TotalAssets': 'Total assets',
+        // Current Liabilities
+        'AccountsPayable': 'Accounts payable',
+        'OtherCurrentLiabilities': 'Other current liabilities',
+        'DeferredRevenue': 'Deferred revenue',
+        'CommercialPaper': 'Commercial paper',
+        'TermDebtCurrent': 'Term debt',
+        'TotalCurrentLiabilities': 'Total current liabilities',
+        // Non-Current Liabilities
+        'TermDebtNonCurrent': 'Term debt',
+        'OtherNonCurrentLiabilities': 'Other non-current liabilities',
+        'TotalNonCurrentLiabilities': 'Total non-current liabilities',
+        'TotalLiabilities': 'Total liabilities',
+        // Shareholders' Equity
+        'CommonStockAndPaidInCapital': 'Common stock and additional paid-in capital',
+        'AccumulatedDeficit': 'Accumulated deficit',
+        'AccumulatedOtherComprehensiveLoss': 'Accumulated other comprehensive loss',
+        'TotalShareholdersEquity': 'Total shareholders\' equity',
         'ChangeInWorkingCapital': 'Change in Working Capital',
         'ChangeInCurrentAssets': 'Change in Current Assets',
         'ChangeInCurrentLiabilities': 'Change in Current Liabilities',

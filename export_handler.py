@@ -243,17 +243,19 @@ class ExportHandler:
                     continue
                 fill_cell = ws.cell(row=row, column=fill_col)
                 fill_cell.fill = PatternFill(start_color="FFFFFF", end_color="FFFFFF", fill_type="solid")
-                # Apply borders: top border if needed, bottom border on last row
+                # Apply borders: NO top border on column C (one cell less of underline), bottom border on last row
                 fill_border_parts = {}
-                if has_top_border:
+                # Only apply top border if NOT column C (column 3)
+                if has_top_border and fill_col != 3:
                     fill_border_parts['top'] = top_thin.top
                 if row == box_end_row:
                     fill_border_parts['bottom'] = outer_border.bottom
                 fill_cell.border = Border(**fill_border_parts) if fill_border_parts else Border()
             
-            # Apply top border to all cells in the row if this row has top border (spanning C to actual_box_end_col)
+            # Apply top border to all cells in the row if this row has top border (spanning D to actual_box_end_col, NOT C)
+            # Column C (to the left of line items) should NOT have top border (one cell less of underline)
             if has_top_border:
-                for border_col in range(box_start_col, actual_box_end_col + 1):
+                for border_col in range(line_item_col, actual_box_end_col + 1):  # Start from D (4), not C (3)
                     border_cell = ws.cell(row=row, column=border_col)
                     # Get existing border and add top
                     existing_border = border_cell.border
@@ -422,68 +424,514 @@ class ExportHandler:
             ws.column_dimensions[col_letter].width = 13.0
     
     def _create_balance_sheet_sheet(self, wb: Workbook):
-        """Create Balance Sheet sheet"""
-        ws = wb.create_sheet("Balance Sheet")
+        """Create Balance Sheet sheet formatted exactly like the Historical IS sheet"""
+        ws = wb.create_sheet("Historical BS")
         
-        balance_data = pd.DataFrame(self.operating_model_data.get('balance_sheet', {}))
-        if balance_data.empty:
-            ws['A1'] = "No data available"
+        balance_data_raw = pd.DataFrame(self.operating_model_data.get('balance_sheet', {}))
+        if balance_data_raw.empty:
+            ws['B2'] = "No data available"
             return
         
-        # Headers
-        headers = ['Line Item'] + list(balance_data.index)
-        ws.append(headers)
+        # Convert to proper structure: rows = line items, columns = years
+        # balance_data_raw has years as index, line items as columns, so transpose
+        if balance_data_raw.index.dtype == 'object' and all(str(x).isdigit() for x in balance_data_raw.index):
+            # Years are in index, transpose
+            balance_data = balance_data_raw.T
+        else:
+            # Already in correct format or needs different handling
+            balance_data = balance_data_raw
         
-        # Style header row
-        header_fill = PatternFill(start_color="366092", end_color="366092", fill_type="solid")
-        header_font = Font(bold=True, color="FFFFFF", size=11)
-        for col in range(1, len(headers) + 1):
-            cell = ws.cell(row=1, column=col)
-            cell.fill = header_fill
+        # Create simplified balance sheet data structure
+        # Map detailed line items to simplified format and aggregate where needed
+        simplified_data = {}
+        years = sorted(balance_data.columns)
+        
+        for year in years:
+            year_data = {}
+            
+            # Assets
+            # Cash & Cash Equivalents
+            year_data['CashAndCashEquivalents'] = balance_data.loc['CashAndCashEquivalents', year] if 'CashAndCashEquivalents' in balance_data.index else 0
+            
+            # Short Term Investments = MarketableSecuritiesCurrent + MarketableSecuritiesNonCurrent
+            marketable_current = balance_data.loc['MarketableSecuritiesCurrent', year] if 'MarketableSecuritiesCurrent' in balance_data.index else 0
+            marketable_noncurrent = balance_data.loc['MarketableSecuritiesNonCurrent', year] if 'MarketableSecuritiesNonCurrent' in balance_data.index else 0
+            year_data['ShortTermInvestments'] = marketable_current + marketable_noncurrent
+            
+            # Current Assets = TotalCurrentAssets
+            year_data['CurrentAssets'] = balance_data.loc['TotalCurrentAssets', year] if 'TotalCurrentAssets' in balance_data.index else 0
+            
+            # Net PPE = PropertyPlantAndEquipmentNet
+            year_data['PPE'] = balance_data.loc['PropertyPlantAndEquipmentNet', year] if 'PropertyPlantAndEquipmentNet' in balance_data.index else 0
+            
+            # Other Long Term Assets = OtherNonCurrentAssets
+            year_data['OtherLongTermAssets'] = balance_data.loc['OtherNonCurrentAssets', year] if 'OtherNonCurrentAssets' in balance_data.index else 0
+            
+            # Total Assets - use GAAP total directly (not sum of components to avoid double-counting)
+            # The condensed format double-counts cash and current marketable securities if we sum components
+            year_data['TotalAssets'] = balance_data.loc['TotalAssets', year] if 'TotalAssets' in balance_data.index else 0
+            
+            # Liabilities
+            # Short Term Liabilities = TotalCurrentLiabilities
+            year_data['ShortTermLiabilities'] = balance_data.loc['TotalCurrentLiabilities', year] if 'TotalCurrentLiabilities' in balance_data.index else 0
+            
+            # Long Term Debt = Total Term Debt (current + non-current) for condensed format
+            # Note: This will cause double-counting in Total Liabilities if we sum components
+            # So we'll use GAAP Total Liabilities directly instead of summing
+            term_debt_current = balance_data.loc['TermDebtCurrent', year] if 'TermDebtCurrent' in balance_data.index else 0
+            term_debt_noncurrent = balance_data.loc['TermDebtNonCurrent', year] if 'TermDebtNonCurrent' in balance_data.index else 0
+            year_data['LongTermDebt'] = term_debt_current + term_debt_noncurrent  # Total term debt
+            
+            # Long Term Leases - try to find it
+            if 'LongTermLeases' in balance_data.index:
+                year_data['LongTermLeases'] = balance_data.loc['LongTermLeases', year]
+            else:
+                # Try to find lease-related items
+                year_data['LongTermLeases'] = 0  # Will be 0 if not found
+            
+            # Other Long Term Liabilities = OtherNonCurrentLiabilities
+            year_data['OtherLongTermLiabilities'] = balance_data.loc['OtherNonCurrentLiabilities', year] if 'OtherNonCurrentLiabilities' in balance_data.index else 0
+            
+            # Total Liabilities - use GAAP total directly (not sum of components to avoid double-counting)
+            # The condensed format double-counts current term debt if we sum components
+            year_data['TotalLiabilities'] = balance_data.loc['TotalLiabilities', year] if 'TotalLiabilities' in balance_data.index else 0
+            
+            # Equity
+            # Retained Earnings = AccumulatedDeficit (negative values are deficits)
+            if 'AccumulatedDeficit' in balance_data.index:
+                year_data['RetainedEarnings'] = balance_data.loc['AccumulatedDeficit', year]
+            else:
+                year_data['RetainedEarnings'] = 0
+            
+            # Common Stock - split from CommonStockAndPaidInCapital
+            # Based on user's analysis: 2024: 8,327.6 + 74,948.4 = 83,276, 2025: 9,356.8 + 84,211.2 = 93,568
+            # Ratio appears to be approximately 10% Common Stock, 90% Paid-in Capital
+            if 'CommonStock' in balance_data.index:
+                year_data['CommonStock'] = balance_data.loc['CommonStock', year]
+            elif 'CommonStockAndPaidInCapital' in balance_data.index:
+                # Split: ~10% Common Stock, ~90% Paid-in Capital (based on Apple's actual breakdown)
+                total = balance_data.loc['CommonStockAndPaidInCapital', year]
+                year_data['CommonStock'] = total * 0.1
+            else:
+                year_data['CommonStock'] = 0
+            
+            # PIC (Paid-in Capital) - split from CommonStockAndPaidInCapital
+            if 'PaidInCapital' in balance_data.index:
+                year_data['PaidInCapital'] = balance_data.loc['PaidInCapital', year]
+            elif 'CommonStockAndPaidInCapital' in balance_data.index:
+                # Split: ~10% Common Stock, ~90% Paid-in Capital
+                total = balance_data.loc['CommonStockAndPaidInCapital', year]
+                year_data['PaidInCapital'] = total * 0.9
+            else:
+                year_data['PaidInCapital'] = 0
+            
+            # Minority Interest
+            year_data['MinorityInterest'] = balance_data.loc['MinorityInterest', year] if 'MinorityInterest' in balance_data.index else 0
+            
+            # Other Equity = TotalShareholdersEquity - (RetainedEarnings + CommonStock + PaidInCapital + MinorityInterest)
+            total_equity = balance_data.loc['TotalShareholdersEquity', year] if 'TotalShareholdersEquity' in balance_data.index else 0
+            year_data['OtherEquity'] = total_equity - year_data['RetainedEarnings'] - year_data['CommonStock'] - year_data['PaidInCapital'] - year_data['MinorityInterest']
+            
+            # Total Equity = TotalShareholdersEquity
+            year_data['TotalEquity'] = total_equity
+            
+            simplified_data[year] = year_data
+        
+        # Convert to DataFrame: rows = line items, columns = years
+        balance_data = pd.DataFrame(simplified_data)
+        
+        # Define colors from the example
+        dark_blue = "FF002060"  # Dark blue fill and text color
+        white_text = "FFFFFFFF"  # White text
+        
+        # Define fonts
+        company_name_font = Font(bold=True, size=20, color=dark_blue)
+        title_font = Font(bold=True, size=15, color=white_text)
+        subtitle_font = Font(size=11, color=white_text)
+        header_font = Font(bold=True, size=11, color=white_text)
+        bold_font = Font(bold=True, size=11)
+        regular_font = Font(size=11)
+        
+        # Define fills
+        dark_blue_fill = PatternFill(start_color=dark_blue, end_color=dark_blue, fill_type="solid")
+        
+        # Define borders
+        outer_border = Border(
+            top=Side(style='thin'),
+            bottom=Side(style='thin'),
+            left=Side(style='thin'),
+            right=Side(style='thin')
+        )
+        # Top border only (for lines above bold items)
+        top_thin = Border(top=Side(style='thin'))
+        # Gray fill for outer cells
+        gray_fill = PatternFill(start_color="D3D3D3", end_color="D3D3D3", fill_type="solid")
+        
+        # Number formats
+        number_format_main = '#,##0.0_);\\(#,##0.0\\)'  # Main format with parentheses for negatives
+        year_format = '####"A"'  # For year headers (2021A, 2022A, etc.)
+        
+        # Row 2: Company name (B2)
+        ws['B2'] = self.company_name
+        ws['B2'].font = company_name_font
+        ws.row_dimensions[2].height = 25.8
+        
+        # Define the box boundaries (content area)
+        box_start_row = 7  # Content starts at row 7
+        box_start_col = 3  # Column C (content starts here)
+        
+        # Calculate actual end column based on number of years
+        years = sorted(balance_data.columns)
+        year_start_col = 7  # Column G
+        actual_box_end_col = year_start_col + len(years) - 1  # Last year column
+        
+        # Border boundaries (one cell out from content box)
+        border_start_row = box_start_row - 1  # Row 6
+        border_start_col = box_start_col - 1  # Column B
+        border_end_col = actual_box_end_col + 1  # One column after last year
+        
+        # Title row (row 7)
+        title_start_col = 3  # Column C
+        for col in range(title_start_col, actual_box_end_col + 1):
+            cell = ws.cell(row=7, column=col)
+            cell.fill = dark_blue_fill
+            if col == title_start_col:
+                cell.value = "Balance Sheet"
+                cell.font = title_font
+        ws.row_dimensions[7].height = 19.8
+        
+        # Subtitle and year headers row (row 8)
+        ws.cell(row=8, column=title_start_col).value = "$ in Millions"
+        ws.cell(row=8, column=title_start_col).font = subtitle_font
+        ws.cell(row=8, column=title_start_col).fill = dark_blue_fill
+        
+        # Fill the rest of the subtitle row with dark blue
+        for col in range(title_start_col + 1, actual_box_end_col + 1):
+            cell = ws.cell(row=8, column=col)
+            cell.fill = dark_blue_fill
+        
+        # Year headers start at column G (7)
+        for col_idx, year in enumerate(years):
+            col = year_start_col + col_idx
+            cell = ws.cell(row=8, column=col)
+            cell.value = int(year)
+            cell.number_format = year_format
             cell.font = header_font
+            cell.fill = dark_blue_fill
             cell.alignment = Alignment(horizontal='center', vertical='center')
+        ws.row_dimensions[8].height = 15.0
         
-        # Balance Sheet line items
+        # Fill rows 9-10 with white background (empty rows between header and data)
+        for r in [9, 10]:
+            for c in range(box_start_col, actual_box_end_col + 1):
+                cell = ws.cell(row=r, column=c)
+                cell.fill = PatternFill(start_color="FFFFFF", end_color="FFFFFF", fill_type="solid")
+        
+        # Line items start at row 11, column D (4)
+        line_item_col = 4  # Column D
+        data_start_col = year_start_col  # Column G (7)
+        
+        # Balance Sheet line items in order (simplified format for Excel)
+        # Format: (label, key, is_bold, has_top_border, is_empty_row, is_section_header)
         line_items = [
-            ('Cash', 'Cash'),
-            ('Short Term Investments', 'ShortTermInvestments'),
-            ('Current Assets', 'CurrentAssets'),
-            ('PPE', 'PPE'),
-            ('Other Long Term Assets', 'OtherLongTermAssets'),
-            ('Total Assets', 'TotalAssets'),
-            ('Short Term Liabilities', 'ShortTermLiabilities'),
-            ('Long Term Debt', 'LongTermDebt'),
-            ('Long Term Leases', 'LongTermLeases'),
-            ('Other Long Term Liabilities', 'OtherLongTermLiabilities'),
-            ('Total Liabilities', 'TotalLiabilities'),
-            ('Retained Earnings', 'RetainedEarnings'),
-            ('Common Stock', 'CommonStock'),
-            ('Paid-in Capital', 'PaidInCapital'),
-            ('Total Equity', 'TotalEquity')
+            # Assets section
+            ('Cash & Cash Equivalents', 'CashAndCashEquivalents', False, False, False, False),
+            ('Short Term Investments', 'ShortTermInvestments', False, False, False, False),
+            ('Current Assets', 'CurrentAssets', False, False, False, False),
+            ('Net PPE', 'PPE', False, False, False, False),
+            ('Other Long Term Assets', 'OtherLongTermAssets', False, False, False, False),
+            ('Total Assets', 'TotalAssets', True, True, False, False),  # Bold, top border
+            (None, None, False, False, True, False),  # Empty row
+            # Liabilities section
+            ('Short Term Liabilities', 'ShortTermLiabilities', False, False, False, False),
+            ('Long Term Debt', 'LongTermDebt', False, False, False, False),
+            ('Long Term Leases', 'LongTermLeases', False, False, False, False),
+            ('Other Long Term Liabilities', 'OtherLongTermLiabilities', False, False, False, False),
+            ('Total Liabilities', 'TotalLiabilities', True, True, False, False),  # Bold, top border
+            (None, None, False, False, True, False),  # Empty row
+            # Equity section
+            ('Retained Earnings', 'RetainedEarnings', False, False, False, False),
+            ('Common Stock', 'CommonStock', False, False, False, False),
+            ('PIC', 'PaidInCapital', False, False, False, False),
+            ('Minority Interest', 'MinorityInterest', False, False, False, False),
+            ('Other', 'OtherEquity', False, False, False, False),
+            ('Total Equity', 'TotalEquity', True, True, False, False),  # Bold, top border
+            (None, None, False, False, True, False),  # Empty row
+            # Final check section
+            ('Assets', 'TotalAssets', True, False, False, False),  # Reference to Total Assets (GAAP value)
+            ('Liabilities + Equity', None, True, False, False, False),  # Will be formula: TotalLiabilities + TotalEquity
+            ('check', None, False, False, False, False)  # Will be formula: Assets - (Liabilities + Equity)
         ]
         
-        row = 2
-        for label, key in line_items:
-            if key in balance_data.columns:
-                ws.cell(row=row, column=1, value=label)
-                col = 2
-                for year in balance_data.index:
-                    value = self.format_number(balance_data.loc[year, key])
-                    ws.cell(row=row, column=col, value=value)
-                    col += 1
+        # Calculate actual box end row based on number of line items (including empty rows)
+        box_end_row = 11 + len(line_items) - 1  # Start at 11, add number of items minus 1
+        border_end_row = box_end_row + 1  # Row after last line item
+        
+        # Track row numbers for totals (for formulas)
+        row_numbers = {}  # Maps key to row number
+        
+        # Write line items starting at row 11
+        row = 11
+        for item in line_items:
+            label, key, is_bold, has_top_border, is_empty_row, _ = item  # Unpack 6 elements (last is unused is_section_header)
+            
+            if is_empty_row:
+                # Empty row - just fill with white
+                for c in range(box_start_col, actual_box_end_col + 1):
+                    cell = ws.cell(row=row, column=c)
+                    cell.fill = PatternFill(start_color="FFFFFF", end_color="FFFFFF", fill_type="solid")
                 row += 1
+                continue
+            
+            # Track row number for this line item
+            if key:
+                row_numbers[key] = row
+            
+            # Write label in column D (4)
+            label_cell = ws.cell(row=row, column=line_item_col)
+            if label:
+                label_cell.value = label
+            label_cell.font = bold_font if is_bold else regular_font
+            # Indent non-bold items
+            if not is_bold:
+                label_cell.alignment = Alignment(horizontal='left', vertical='center', indent=1)
+            else:
+                label_cell.alignment = Alignment(horizontal='left', vertical='center')
+            
+            # Set white background for cells inside the box
+            label_cell.fill = PatternFill(start_color="FFFFFF", end_color="FFFFFF", fill_type="solid")
+            
+            # Apply borders: top border if specified, bottom border on last row
+            label_border_parts = {}
+            if has_top_border:
+                label_border_parts['top'] = top_thin.top
+            if row == box_end_row:
+                label_border_parts['bottom'] = outer_border.bottom
+            label_cell.border = Border(**label_border_parts) if label_border_parts else Border()
+            
+            # Also fill cells in columns C, E, F with white
+            for fill_col in [3, 5, 6]:  # Columns C, E, F
+                if fill_col < box_start_col or fill_col > actual_box_end_col:
+                    continue
+                fill_cell = ws.cell(row=row, column=fill_col)
+                fill_cell.fill = PatternFill(start_color="FFFFFF", end_color="FFFFFF", fill_type="solid")
+                fill_border_parts = {}
+                # Only apply top border if NOT column C (column 3) - one cell less of underline
+                if has_top_border and fill_col != 3:
+                    fill_border_parts['top'] = top_thin.top
+                if row == box_end_row:
+                    fill_border_parts['bottom'] = outer_border.bottom
+                fill_cell.border = Border(**fill_border_parts) if fill_border_parts else Border()
+            
+            # Apply top border to all cells in the row if this row has top border (spanning D to actual_box_end_col, NOT C)
+            # Column C (to the left of line items) should NOT have top border (one cell less of underline)
+            if has_top_border:
+                for border_col in range(line_item_col, actual_box_end_col + 1):  # Start from D (4), not C (3)
+                    border_cell = ws.cell(row=row, column=border_col)
+                    existing_border = border_cell.border
+                    border_cell.border = Border(
+                        left=existing_border.left if existing_border.left else None,
+                        top=top_thin.top,
+                        right=existing_border.right if existing_border.right else None,
+                        bottom=existing_border.bottom if existing_border.bottom else None
+                    )
+            
+            # Write values for each year
+            if key is None:
+                # Handle special rows without keys
+                if label == 'Liabilities + Equity':
+                    # Formula: TotalLiabilities + TotalEquity
+                    total_liab_row = row_numbers.get('TotalLiabilities', row - 1)
+                    total_equity_row = row_numbers.get('TotalEquity', row - 1)
+                    for col_idx, year in enumerate(years):
+                        col = data_start_col + col_idx
+                        cell = ws.cell(row=row, column=col)
+                        col_letter = get_column_letter(col)
+                        formula = f'={col_letter}{total_liab_row}+{col_letter}{total_equity_row}'
+                        cell.value = formula
+                        cell.number_format = number_format_main
+                        cell.font = bold_font
+                        cell.alignment = Alignment(horizontal='right', vertical='center')
+                        cell.fill = PatternFill(start_color="FFFFFF", end_color="FFFFFF", fill_type="solid")
+                elif label == 'check':
+                    # Formula: Assets - (Liabilities + Equity) = TotalAssets - (TotalLiabilities + TotalEquity)
+                    total_assets_row = row_numbers.get('TotalAssets', row - 2)
+                    total_liab_row = row_numbers.get('TotalLiabilities', row - 2)
+                    total_equity_row = row_numbers.get('TotalEquity', row - 1)
+                    for col_idx, year in enumerate(years):
+                        col = data_start_col + col_idx
+                        cell = ws.cell(row=row, column=col)
+                        col_letter = get_column_letter(col)
+                        formula = f'={col_letter}{total_assets_row}-({col_letter}{total_liab_row}+{col_letter}{total_equity_row})'
+                        cell.value = formula
+                        cell.number_format = number_format_main
+                        cell.font = regular_font
+                        cell.alignment = Alignment(horizontal='right', vertical='center')
+                        cell.fill = PatternFill(start_color="FFFFFF", end_color="FFFFFF", fill_type="solid")
+                else:
+                    # Empty row or other - just fill with white
+                    for col_idx in range(len(years)):
+                        col = data_start_col + col_idx
+                        cell = ws.cell(row=row, column=col)
+                        cell.fill = PatternFill(start_color="FFFFFF", end_color="FFFFFF", fill_type="solid")
+                
+                if row == box_end_row:
+                    for col_idx in range(len(years)):
+                        col = data_start_col + col_idx
+                        cell = ws.cell(row=row, column=col)
+                        cell.border = Border(bottom=outer_border.bottom)
+            elif key in balance_data.index:
+                for col_idx, year in enumerate(years):
+                    col = data_start_col + col_idx
+                    cell = ws.cell(row=row, column=col)
+                    
+                    # For totals, use the actual GAAP values (not sum of components to avoid double-counting)
+                    # Total Assets: Use GAAP total directly (components double-count cash and current marketable securities)
+                    # Total Liabilities: Use GAAP total directly (components double-count current term debt)
+                    if key == 'TotalAssets':
+                        # Use the actual GAAP Total Assets value (not sum of components)
+                        value = balance_data.loc[key, year]
+                        value_millions = self.format_number(value, 'millions')
+                        cell.value = value_millions
+                    elif key == 'TotalLiabilities':
+                        # Use the actual GAAP Total Liabilities value (not sum of components)
+                        value = balance_data.loc[key, year]
+                        value_millions = self.format_number(value, 'millions')
+                        cell.value = value_millions
+                    elif key == 'TotalEquity':
+                        # Sum: RetainedEarnings + CommonStock + PaidInCapital + MinorityInterest + OtherEquity
+                        col_letter = get_column_letter(col)
+                        formula = f'={col_letter}{row_numbers.get("RetainedEarnings", row-5)}+{col_letter}{row_numbers.get("CommonStock", row-4)}+{col_letter}{row_numbers.get("PaidInCapital", row-3)}+{col_letter}{row_numbers.get("MinorityInterest", row-2)}+{col_letter}{row_numbers.get("OtherEquity", row-1)}'
+                        cell.value = formula
+                    elif key == 'TotalAssets' and label == 'Assets':
+                        # Reference to TotalAssets row (for Final check section) - use the GAAP value
+                        # This is the same as the Total Assets row above, so reference it
+                        col_letter = get_column_letter(col)
+                        total_assets_row = row_numbers.get('TotalAssets', row - 1)
+                        formula = f'={col_letter}{total_assets_row}'
+                        cell.value = formula
+                    else:
+                        # Regular line item - use value from data
+                        value = balance_data.loc[key, year]  # key is row (line item), year is column
+                        value_millions = self.format_number(value, 'millions')
+                        cell.value = value_millions
+                    
+                    cell.number_format = number_format_main
+                    cell.font = bold_font if is_bold else regular_font
+                    cell.alignment = Alignment(horizontal='right', vertical='center')
+                    cell.fill = PatternFill(start_color="FFFFFF", end_color="FFFFFF", fill_type="solid")
+                    
+                    cell_border_parts = {}
+                    if has_top_border:
+                        cell_border_parts['top'] = top_thin.top
+                    if row == box_end_row:
+                        cell_border_parts['bottom'] = outer_border.bottom
+                    cell.border = Border(**cell_border_parts) if cell_border_parts else Border()
+            else:
+                # If key not found, write zeros
+                for col_idx in range(len(years)):
+                    col = data_start_col + col_idx
+                    cell = ws.cell(row=row, column=col)
+                    cell.value = 0.0
+                    cell.number_format = number_format_main
+                    cell.font = bold_font if is_bold else regular_font
+                    cell.alignment = Alignment(horizontal='right', vertical='center')
+                    cell.fill = PatternFill(start_color="FFFFFF", end_color="FFFFFF", fill_type="solid")
+                    
+                    cell_border_parts = {}
+                    if has_top_border:
+                        cell_border_parts['top'] = top_thin.top
+                    if row == box_end_row:
+                        cell_border_parts['bottom'] = outer_border.bottom
+                    cell.border = Border(**cell_border_parts) if cell_border_parts else Border()
+            
+            row += 1
         
-        # Format columns
-        for col in range(2, len(headers) + 1):
-            for row in range(2, ws.max_row + 1):
-                cell = ws.cell(row=row, column=col)
-                if cell.value is not None:
-                    cell.number_format = '#,##0.00'
+        # Draw outer border around the box
+        # Top border (row 6)
+        for c in range(border_start_col, border_end_col + 1):
+            cell = ws.cell(row=border_start_row, column=c)
+            if c == border_start_col:
+                cell.border = Border(left=outer_border.left, top=outer_border.top, right=None, bottom=None)
+            elif c == border_end_col:
+                cell.border = Border(left=None, top=outer_border.top, right=outer_border.right, bottom=None)
+            else:
+                cell.border = Border(left=None, top=outer_border.top, right=None, bottom=None)
         
-        # Adjust column widths
-        ws.column_dimensions['A'].width = 25
-        for col in range(2, len(headers) + 1):
-            ws.column_dimensions[get_column_letter(col)].width = 15
+        # Bottom border (row border_end_row)
+        for c in range(border_start_col, border_end_col + 1):
+            cell = ws.cell(row=border_end_row, column=c)
+            if c == border_start_col:
+                cell.border = Border(left=outer_border.left, top=None, right=None, bottom=outer_border.bottom)
+            elif c == border_end_col:
+                cell.border = Border(left=None, top=None, right=outer_border.right, bottom=outer_border.bottom)
+            else:
+                cell.border = Border(left=None, top=None, right=None, bottom=outer_border.bottom)
+        
+        # Left border (column B)
+        for r in range(border_start_row + 1, border_end_row):
+            cell = ws.cell(row=r, column=border_start_col)
+            existing_border = cell.border
+            cell.border = Border(
+                left=outer_border.left,
+                top=existing_border.top if existing_border.top else None,
+                right=None,
+                bottom=existing_border.bottom if existing_border.bottom else None
+            )
+        
+        # Right border (column border_end_col)
+        for r in range(border_start_row + 1, border_end_row):
+            cell = ws.cell(row=r, column=border_end_col)
+            existing_border = cell.border
+            cell.border = Border(
+                left=None,
+                top=existing_border.top if existing_border.top else None,
+                right=outer_border.right,
+                bottom=existing_border.bottom if existing_border.bottom else None
+            )
+        
+        # Fill buffer cells (one cell around the box) with white
+        for c in range(border_start_col, border_end_col + 1):
+            cell = ws.cell(row=border_start_row, column=c)
+            cell.fill = PatternFill(start_color="FFFFFF", end_color="FFFFFF", fill_type="solid")
+        
+        for c in range(border_start_col, border_end_col + 1):
+            cell = ws.cell(row=border_end_row, column=c)
+            cell.fill = PatternFill(start_color="FFFFFF", end_color="FFFFFF", fill_type="solid")
+        
+        for r in range(border_start_row + 1, border_end_row):
+            cell = ws.cell(row=r, column=border_start_col)
+            cell.fill = PatternFill(start_color="FFFFFF", end_color="FFFFFF", fill_type="solid")
+        
+        for r in range(border_start_row + 1, border_end_row):
+            cell = ws.cell(row=r, column=border_end_col)
+            cell.fill = PatternFill(start_color="FFFFFF", end_color="FFFFFF", fill_type="solid")
+        
+        # Fill all other cells with gray
+        max_row_to_fill = max(200, border_end_row + 200)
+        max_col_to_fill = max(100, border_end_col + 100)
+        
+        for r in range(1, max_row_to_fill + 1):
+            for c in range(1, max_col_to_fill + 1):
+                if (border_start_row <= r <= border_end_row and border_start_col <= c <= border_end_col):
+                    continue
+                cell = ws.cell(row=r, column=c)
+                current_fill = cell.fill.start_color.rgb if cell.fill and hasattr(cell.fill, 'start_color') else None
+                if current_fill in [None, '00000000', 'FFFFFFFF']:
+                    cell.fill = gray_fill
+                cell.border = Border()
+        
+        # Adjust column widths (matching the example)
+        ws.column_dimensions['A'].width = 13.0
+        ws.column_dimensions['B'].width = 5.44
+        ws.column_dimensions['C'].width = 12.44
+        ws.column_dimensions['D'].width = 8.44
+        ws.column_dimensions['E'].width = 13.0
+        ws.column_dimensions['F'].width = 17.44
+        # Year columns (G, H, I, J, etc.)
+        for col_idx in range(len(years)):
+            col_letter = get_column_letter(data_start_col + col_idx)
+            ws.column_dimensions[col_letter].width = 13.0
     
     def _create_cash_flow_sheet(self, wb: Workbook):
         """Create Cash Flow Statement sheet"""

@@ -94,77 +94,123 @@ class SECClient:
     }
     
     BALANCE_SHEET_CONCEPTS = {
-        'Cash': [
+        # Current Assets
+        'CashAndCashEquivalents': [
             'CashAndCashEquivalentsAtCarryingValue', 'CashCashEquivalentsAndShortTermInvestments',
             'Cash', 'CashAndCashEquivalents', 'CashCashEquivalentsAndRestrictedCash',
             'CashCashEquivalentsAndRestrictedCashRestrictedCash', 'CashAndShortTermInvestments'
         ],
-        'ShortTermInvestments': [
-            'ShortTermInvestments', 'AvailableForSaleSecuritiesCurrent',
-            'MarketableSecuritiesCurrent', 'ShortTermInvestmentsAvailableForSale',
-            'TradingSecuritiesCurrent', 'ShortTermInvestmentsAtCarryingValue'
+        'MarketableSecuritiesCurrent': [
+            'MarketableSecuritiesCurrent', 'ShortTermInvestments', 'AvailableForSaleSecuritiesCurrent',
+            'ShortTermInvestmentsAvailableForSale', 'TradingSecuritiesCurrent', 'ShortTermInvestmentsAtCarryingValue'
         ],
-        'CurrentAssets': [
+        'AccountsReceivableNet': [
+            'AccountsReceivableNetCurrent', 'AccountsReceivableNet', 'TradeAndOtherReceivablesNet',
+            'AccountsReceivableNetOfAllowanceForDoubtfulAccounts', 'ReceivablesNetCurrent'
+        ],
+        'VendorNonTradeReceivables': [
+            'NontradeReceivablesCurrent', 'VendorNonTradeReceivables', 'OtherReceivables', 
+            'NonTradeReceivables', 'ReceivablesFromRelatedParties', 'OtherReceivablesCurrent'
+        ],
+        'Inventories': [
+            'InventoryNet', 'Inventory', 'InventoriesNetOfReserves', 'InventoryAtLowerOfCostOrMarket',
+            'InventoryFinishedGoods', 'InventoryRawMaterialsAndSupplies', 'InventoryWorkInProcess'
+        ],
+        'OtherCurrentAssets': [
+            'OtherAssetsCurrent', 'OtherCurrentAssets', 'PrepaidExpensesCurrent',
+            'DeferredCostsCurrent', 'AssetsCurrentOther'
+        ],
+        'TotalCurrentAssets': [
             'AssetsCurrent', 'CurrentAssets', 'TotalCurrentAssets',
             'AssetsCurrentExcludingOtherAssets', 'AssetsCurrentIncludingOtherAssets'
         ],
-        'PPE': [
+        # Non-Current Assets
+        'MarketableSecuritiesNonCurrent': [
+            'MarketableSecuritiesNoncurrent', 'AvailableForSaleSecuritiesNoncurrent',
+            'LongTermInvestments', 'InvestmentsNoncurrent', 'SecuritiesNoncurrent'
+        ],
+        'PropertyPlantAndEquipmentNet': [
             'PropertyPlantAndEquipmentNet', 'PropertyPlantAndEquipment',
             'PropertyPlantAndEquipmentNetOfAccumulatedDepreciation', 'PropertyPlantAndEquipmentGross',
             'PropertyPlantAndEquipmentNetIncludingLeaseRightOfUseAsset',
             'PropertyPlantAndEquipmentNetExcludingLeaseRightOfUseAsset'
         ],
-        'OtherLongTermAssets': [
-            'AssetsNoncurrent', 'OtherAssetsNoncurrent', 'NoncurrentAssets',
-            'OtherAssets', 'OtherNoncurrentAssets', 'AssetsNoncurrentExcludingOtherAssets',
-            'LongTermInvestments', 'IntangibleAssetsNetExcludingGoodwill', 'Goodwill'
+        'OtherNonCurrentAssets': [
+            'OtherAssetsNoncurrent', 'OtherNoncurrentAssets', 'AssetsNoncurrent',
+            'OtherAssets', 'AssetsNoncurrentExcludingOtherAssets',
+            'IntangibleAssetsNetExcludingGoodwill', 'Goodwill'
+        ],
+        'TotalNonCurrentAssets': [
+            'AssetsNoncurrent', 'NoncurrentAssets', 'TotalNoncurrentAssets',
+            'AssetsNoncurrentExcludingOtherAssets', 'AssetsNoncurrentIncludingOtherAssets'
         ],
         'TotalAssets': [
             'Assets', 'AssetsTotal', 'TotalAssets',
             'AssetsIncludingOtherAssets', 'AssetsExcludingOtherAssets'
         ],
-        'ShortTermLiabilities': [
-            'LiabilitiesCurrent', 'CurrentLiabilities', 'TotalCurrentLiabilities',
-            'LiabilitiesCurrentExcludingOtherLiabilities', 'AccountsPayableCurrent',
-            'AccruedLiabilitiesCurrent', 'ShortTermDebt'
+        # Current Liabilities
+        'AccountsPayable': [
+            'AccountsPayableCurrent', 'AccountsPayable', 'TradeAndOtherPayablesCurrent',
+            'AccountsPayableTrade', 'PayablesCurrent'
         ],
-        'LongTermDebt': [
+        'OtherCurrentLiabilities': [
+            'OtherLiabilitiesCurrent', 'OtherCurrentLiabilities', 'AccruedLiabilitiesCurrent',
+            'AccruedLiabilities', 'LiabilitiesCurrentOther'
+        ],
+        'DeferredRevenue': [
+            'ContractWithCustomerLiabilityCurrent', 'ContractWithCustomerLiability',
+            'DeferredRevenueCurrent', 'DeferredRevenue', 'ContractWithCustomerAssetNet',
+            'ContractWithCustomerLiabilityNet', 'UnearnedRevenueCurrent'
+        ],
+        'CommercialPaper': [
+            'CommercialPaper', 'ShortTermDebt', 'ShortTermBorrowings',
+            'DebtCurrent', 'CurrentMaturitiesOfLongTermDebt'
+        ],
+        'TermDebtCurrent': [
+            'LongTermDebtCurrent', 'DebtCurrent', 'CurrentMaturitiesOfLongTermDebt',
+            'LongTermDebtAndCapitalLeaseObligationsCurrent', 'ShortTermDebt'
+        ],
+        'TotalCurrentLiabilities': [
+            'LiabilitiesCurrent', 'CurrentLiabilities', 'TotalCurrentLiabilities',
+            'LiabilitiesCurrentExcludingOtherLiabilities'
+        ],
+        # Non-Current Liabilities
+        'TermDebtNonCurrent': [
             'LongTermDebt', 'LongTermDebtAndCapitalLeaseObligations',
             'LongTermDebtExcludingCurrentMaturities', 'LongTermDebtNetOfCurrentMaturities',
             'LongTermDebtAndCapitalLeaseObligationsExcludingCurrentMaturities',
             'LongTermDebtIncludingCurrentMaturities'
         ],
-        'LongTermLeases': [
-            'OperatingLeaseLiabilityNoncurrent', 'LeaseLiabilityNoncurrent',
-            'LongTermOperatingLeaseLiability', 'FinanceLeaseLiabilityNoncurrent',
-            'OperatingLeaseRightOfUseAsset', 'FinanceLeaseRightOfUseAsset'
-        ],
-        'OtherLongTermLiabilities': [
-            'LiabilitiesNoncurrent', 'OtherLiabilitiesNoncurrent',
+        'OtherNonCurrentLiabilities': [
+            'OtherLiabilitiesNoncurrent', 'OtherNoncurrentLiabilities', 'LiabilitiesNoncurrent',
             'OtherNoncurrentLiabilities', 'TotalNoncurrentLiabilities',
-            'LiabilitiesNoncurrentExcludingOtherLiabilities', 'DeferredTaxLiabilitiesNoncurrent'
+            'LiabilitiesNoncurrentExcludingOtherLiabilities', 'DeferredTaxLiabilitiesNoncurrent',
+            'OperatingLeaseLiabilityNoncurrent', 'LeaseLiabilityNoncurrent'
+        ],
+        'TotalNonCurrentLiabilities': [
+            'LiabilitiesNoncurrent', 'TotalNoncurrentLiabilities',
+            'LiabilitiesNoncurrentExcludingOtherLiabilities'
         ],
         'TotalLiabilities': [
             'Liabilities', 'LiabilitiesTotal', 'TotalLiabilities',
             'LiabilitiesIncludingOtherLiabilities', 'LiabilitiesExcludingOtherLiabilities'
         ],
-        'RetainedEarnings': [
-            'RetainedEarningsAccumulatedDeficit', 'RetainedEarnings',
-            'RetainedEarningsAppropriated', 'AccumulatedDeficit',
-            'RetainedEarningsUnappropriated', 'AccumulatedOtherComprehensiveIncomeLossNetOfTax'
+        # Shareholders' Equity
+        'CommonStockAndPaidInCapital': [
+            'CommonStocksIncludingAdditionalPaidInCapital', 'CommonStockAndAdditionalPaidInCapital',
+            'AdditionalPaidInCapital', 'CommonStockValue', 'PaidInCapital',
+            'AdditionalPaidInCapitalCommonStock'
         ],
-        'CommonStock': [
-            'CommonStockValue', 'CommonStocksIncludingAdditionalPaidInCapital',
-            'CommonStockSharesOutstanding', 'CommonStockParOrStatedValuePerShare',
-            'CommonStockSharesAuthorized', 'CommonStockParValue'
+        'AccumulatedDeficit': [
+            'RetainedEarningsAccumulatedDeficit', 'AccumulatedDeficit', 'RetainedEarnings',
+            'RetainedEarningsAppropriated', 'RetainedEarningsUnappropriated'
         ],
-        'PaidInCapital': [
-            'AdditionalPaidInCapital', 'CommonStockAndAdditionalPaidInCapital',
-            'AdditionalPaidInCapitalCommonStock', 'PaidInCapital',
-            'AdditionalPaidInCapitalAndRetainedEarnings'
+        'AccumulatedOtherComprehensiveLoss': [
+            'AccumulatedOtherComprehensiveIncomeLossNetOfTax', 'AccumulatedOtherComprehensiveIncomeLoss',
+            'AccumulatedOtherComprehensiveIncome', 'OtherComprehensiveIncomeLossNetOfTax'
         ],
-        'TotalEquity': [
-            'Equity', 'StockholdersEquity', 'EquityAttributableToParent',
+        'TotalShareholdersEquity': [
+            'StockholdersEquity', 'Equity', 'EquityAttributableToParent',
             'StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest',
             'EquityExcludingOtherEquity', 'EquityIncludingOtherEquity'
         ]
@@ -423,37 +469,62 @@ class SECClient:
                             data_list = concept_data['units'][unit_to_use]
                             
                             # Filter for annual data: ONLY use periods that span a full year (330-400 days)
+                            # OR point-in-time data (balance sheets) that match fiscal year end dates
                             # This ensures we only get 10-K annual data, never quarterly data
                             annual_data = []
                             for item in data_list:
                                 end_date = item.get('end', '')
                                 start_date = item.get('start', '')
+                                form = item.get('form', '')
                                 
-                                if end_date and len(end_date) >= 10 and start_date and len(start_date) >= 10:
+                                if end_date and len(end_date) >= 10:
                                     try:
                                         from datetime import datetime
                                         end_dt = datetime.strptime(end_date, '%Y-%m-%d')
-                                        start_dt = datetime.strptime(start_date, '%Y-%m-%d')
-                                        days_diff = (end_dt - start_dt).days
                                         calendar_year = end_dt.year
                                         
-                                        # STRICT: Only include periods that span approximately a full year (330-400 days)
-                                        # This ensures we only get annual 10-K data, never quarterly (which would be ~90 days)
-                                        if 330 <= days_diff <= 400:
-                                            # If we have a fiscal year end pattern, prefer exact match but also accept annual data from same calendar year
+                                        # Check if this is a period (has start_date) or point-in-time (no start_date)
+                                        is_period = start_date and len(start_date) >= 10
+                                        is_point_in_time = not is_period
+                                        
+                                        if is_period:
+                                            # Period data: must span approximately a full year (330-400 days)
+                                            start_dt = datetime.strptime(start_date, '%Y-%m-%d')
+                                            days_diff = (end_dt - start_dt).days
+                                            
+                                            # STRICT: Only include periods that span approximately a full year (330-400 days)
+                                            # This ensures we only get annual 10-K data, never quarterly (which would be ~90 days)
+                                            if 330 <= days_diff <= 400:
+                                                # If we have a fiscal year end pattern, prefer exact match but also accept annual data from same calendar year
+                                                if fiscal_year_ends and calendar_year in fiscal_year_ends:
+                                                    expected_date = fiscal_year_ends[calendar_year]
+                                                    if end_date == expected_date:
+                                                        # Exact match - highest priority
+                                                        annual_data.append(item)
+                                                    # Also accept annual data from the same calendar year if it's a full year period
+                                                    # This handles cases where a concept might have slightly different fiscal year ends
+                                                    elif end_dt.month in [9, 10, 11, 12]:
+                                                        # It's a full year period ending in a common fiscal year end month
+                                                        annual_data.append(item)
+                                                elif not fiscal_year_ends:
+                                                    # No pattern available, use any full-year period
+                                                    annual_data.append(item)
+                                        elif is_point_in_time:
+                                            # Point-in-time data (balance sheets): must match fiscal year end pattern
+                                            # Only accept if it matches the fiscal year end date for that year
                                             if fiscal_year_ends and calendar_year in fiscal_year_ends:
                                                 expected_date = fiscal_year_ends[calendar_year]
                                                 if end_date == expected_date:
-                                                    # Exact match - highest priority
+                                                    # Exact match to fiscal year end - this is annual balance sheet data
                                                     annual_data.append(item)
-                                                # Also accept annual data from the same calendar year if it's a full year period
-                                                # This handles cases where a concept might have slightly different fiscal year ends
-                                                elif end_dt.month in [9, 10, 11, 12]:
-                                                    # It's a full year period ending in a common fiscal year end month
+                                                # Also accept if it's in a common fiscal year end month (Sep/Oct/Nov/Dec)
+                                                # and the form is 10-K (not 10-Q)
+                                                elif end_dt.month in [9, 10, 11, 12] and form == '10-K':
                                                     annual_data.append(item)
                                             elif not fiscal_year_ends:
-                                                # No pattern available, use any full-year period
-                                                annual_data.append(item)
+                                                # No pattern available, but accept point-in-time data if form is 10-K and in common fiscal year end months
+                                                if form == '10-K' and end_dt.month in [9, 10, 11, 12]:
+                                                    annual_data.append(item)
                                     except:
                                         # Skip items that can't be parsed
                                         pass
@@ -773,10 +844,16 @@ class SECClient:
         """Parse Balance Sheet data from XBRL facts"""
         balance_data = {}
         
-        # Extract last 10 years of data to ensure we have enough, then filter to 3 most recent
+        # Extract last 10 years of data to ensure we have enough, then filter to 5 most recent
         for key, concept_list in self.BALANCE_SHEET_CONCEPTS.items():
             historical = self.extract_historical_data(facts, concept_list, years=10, fiscal_year_ends=fiscal_year_ends)
             balance_data[key] = historical
+            # Debug: print what we found
+            if historical:
+                years_found = [k for k in historical.keys() if not k.endswith('_date')]
+                print(f"DEBUG: Found {key} for years: {sorted(years_found, reverse=True)[:5]}")
+            else:
+                print(f"DEBUG: No data found for {key} (tried {len(concept_list)} concepts)")
         
         # Convert to DataFrame
         years = set()
